@@ -289,6 +289,7 @@ pub fn priority_field_value_from_query_string(url: &url::Url) -> Option<String> 
 }
 
 /// Construct a Priority from quiche apps custom query string.
+/// Parameter exp_eps allows to put urlencoded priority value as request
 pub fn priority_from_query_string(url: &url::Url) -> Option<Priority> {
     let mut urgency = None;
     let mut incremental = None;
@@ -300,6 +301,9 @@ pub fn priority_from_query_string(url: &url::Url) -> Option<Priority> {
         if param.0 == "i" && param.1 == "1" {
             incremental = Some(true);
         }
+	if param.0 == "exp_eps" {
+	    return Priority::try_from(param.1.as_bytes()).ok();
+	}
     }
 
     match (urgency, incremental) {
