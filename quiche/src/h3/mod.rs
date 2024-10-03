@@ -286,6 +286,8 @@ use std::collections::VecDeque;
 
 #[cfg(feature = "sfv")]
 use std::convert::TryFrom;
+#[cfg(feature = "sfv")]
+use num_traits::cast::ToPrimitive;
 use std::fmt;
 use std::fmt::Write;
 
@@ -700,6 +702,109 @@ pub enum Event {
     GoAway,
 }
 
+#[cfg(feature = "sfv")]
+fn eps_parse_urgency(bitem: Option<&sfv::BareItem>) -> std::result::Result<u8, crate::h3::Error> {
+    match bitem {
+	None => Ok(PRIORITY_URGENCY_DEFAULT),
+	Some(bi) => match bi.as_int() {
+	    Some(v) => {
+		if !(PRIORITY_URGENCY_LOWER_BOUND as i64..=
+                     PRIORITY_URGENCY_UPPER_BOUND as i64)
+                    .contains(&v)
+		{
+                    Ok(PRIORITY_URGENCY_UPPER_BOUND)
+		} else {
+                    Ok(v as u8)
+		}
+            },
+            None => Err(Error::Done),
+	}
+    }
+}
+
+#[cfg(feature = "sfv")]
+fn eps_parse_incremental(bitem: Option<&sfv::BareItem>) -> std::result::Result<bool, crate::h3::Error> {
+    match bitem {
+	None => Ok(false),
+	Some(bi) => Ok(bi.as_bool().ok_or(Error::Done)?),
+    }
+}
+
+#[cfg(feature = "sfv")]
+fn eps_parse_weight(bitem: Option<&sfv::BareItem>) -> std::result::Result<u32, crate::h3::Error> {
+    match bitem {
+	None => Ok(0),
+	Some(bi) => match bi.as_decimal() {
+	    Some(v) => {
+		let f = v.to_f64().ok_or(Error::Done)?;
+		if f > 0.0 && f < 1.0 {
+		    Ok((f * 1000.0) as u32)
+		} else {
+		    Err(Error::Done)
+		}
+	    },
+	    None => Err(Error::Done),
+	}
+    }
+}
+
+#[cfg(feature = "sfv")]
+fn eps_parse_id(bitem: Option<&sfv::BareItem>) -> std::result::Result<Option<String>, crate::h3::Error> {
+    match bitem {
+	None => Ok(None),
+	Some(bi) => Ok(Some(bi.as_str().ok_or(Error::Done)?.to_owned())),
+    }
+}
+
+#[cfg(feature = "sfv")]
+fn eps_parse_protection_ratio(bitem: Option<&sfv::BareItem>) -> std::result::Result<u32, crate::h3::Error> {
+    match bitem {
+	None => Ok(0),
+	Some(bi) => match bi.as_decimal() {
+	    Some(v) => {
+		let f = v.to_f64().ok_or(Error::Done)?;
+		if f > 0.0 && f < 1.0 {
+		    Ok((f * 1000.0) as u32)
+		} else {
+		    Err(Error::Done)
+		}
+	    },
+	    None => Err(Error::Done),
+	}
+    }
+}
+
+#[cfg(feature = "sfv")]
+fn eps_parse_burst_loss_tolerance(bitem: Option<&sfv::BareItem>) -> std::result::Result<u32, crate::h3::Error> {
+    match bitem {
+	None => Ok(0),
+	Some(bi) => match bi.as_int() {
+	    Some(v) => Ok(u32::try_from(v)
+			  .map_err(|_|
+				   crate::h3::Error::Done)?),
+	    None => Ok(0),
+	}
+    }
+}
+
+#[cfg(feature = "sfv")]
+fn eps_parse_repair_delay_tolerance(bitem: Option<&sfv::BareItem>) -> std::result::Result<u32, crate::h3::Error> {
+    match bitem {
+	None => Ok(0),
+	Some(bi) => match bi.as_decimal() {
+	    Some(v) => {
+		let f = v.to_f64().ok_or(Error::Done)?;
+		if f > 0.0 && f < 1.0 {
+		    Ok((f * 1000.0) as u32)
+		} else {
+		    Err(Error::Done)
+		}
+	    },
+	    None => Err(Error::Done),
+	}
+    }
+}
+
 /// Extensible Priorities parameters.
 ///
 /// The `TryFrom` trait supports constructing this object from the serialized
@@ -708,28 +813,85 @@ pub enum Event {
 /// trait requires the `sfv` feature to be enabled.
 #[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
-pub struct Priority {
+pub struct Priority(Vec<PriorityValues>);
+
+/// The priority attributes of a node in the tree of priority classes
+#[derive(Debug, PartialEq, Eq)]
+#[repr(C)]
+pub struct PriorityValues {
     urgency: u8,
     incremental: bool,
+    weight: u32,
+    id: Option<String>,
+    // in promille, cannot implement Eq for float types
+    protection_ratio: u32,
+    burst_loss_tolerance: u32,
+    // in promille, cannot implement Eq for float types
+    repair_delay_tolerance: u32,
+}
+
+
+impl Default for PriorityValues {
+    fn default() -> Self {
+        Self {
+            urgency: PRIORITY_URGENCY_DEFAULT,
+            incremental: PRIORITY_INCREMENTAL_DEFAULT,
+	    weight: 0,
+	    id: None,
+	    protection_ratio: 0,
+	    burst_loss_tolerance: 0,
+	    repair_delay_tolerance: 0,
+        }
+    }
 }
 
 impl Default for Priority {
     fn default() -> Self {
-        Priority {
-            urgency: PRIORITY_URGENCY_DEFAULT,
-            incremental: PRIORITY_INCREMENTAL_DEFAULT,
-        }
+	Self(vec![Default::default()])
     }
+}
+
+impl PriorityValues {
+    /// Creates a new Priority.
+    pub fn new(urgency: u8, incremental: bool) -> Self {
+	let mut prio: Self = Default::default();
+	prio.urgency = urgency;
+	prio.incremental = incremental;
+	prio
+    }
+
+    /// Creates a new Priority with experimental parameters
+    pub fn new_experimental(urgency: u8, incremental: bool, weight: u32,
+			    id: Option<String>,
+			    protection_ratio: u32, burst_loss_tolerance: u32,
+			    repair_delay_tolerance: u32) -> Self {
+	Self {
+	    urgency,
+	    incremental,
+	    weight,
+	    id,
+	    protection_ratio,
+	    burst_loss_tolerance,
+	    repair_delay_tolerance,
+	}
+    }
+
 }
 
 impl Priority {
     /// Creates a new Priority.
-    pub const fn new(urgency: u8, incremental: bool) -> Self {
-        Priority {
-            urgency,
-            incremental,
-        }
+    pub fn new_hierarchical(values: Vec<PriorityValues>) -> Self {
+	Self(values)
     }
+
+
+    /// Creates a new priority, legacy constructor
+    pub fn new(urgency: u8, incremental: bool) -> Self {
+	Self::new_hierarchical(
+	    vec!(PriorityValues::new(
+		urgency, incremental)))	
+    }
+
 }
 
 #[cfg(feature = "sfv")]
@@ -753,48 +915,100 @@ impl TryFrom<&[u8]> for Priority {
     ///
     /// [Extensible Priorities]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     fn try_from(value: &[u8]) -> std::result::Result<Self, Self::Error> {
-        let dict = match sfv::Parser::parse_dictionary(value) {
+	let dict = match sfv::Parser::parse_dictionary(value) {
             Ok(v) => v,
 
             Err(_) => return Err(Error::Done),
         };
 
-        let urgency = match dict.get("u") {
+	let mut prio = Vec::new();
+	
+	let urgency = match dict.get("u") {
             // If there is a u parameter, try to read it as an Item of type
             // Integer. If the value out of the spec's allowed range
             // (0 through 7), that's an error so set it to the upper
             // bound (lowest priority) to avoid interference with
             // other streams.
-            Some(sfv::ListEntry::Item(item)) => match item.bare_item.as_int() {
-                Some(v) => {
-                    if !(PRIORITY_URGENCY_LOWER_BOUND as i64..=
-                        PRIORITY_URGENCY_UPPER_BOUND as i64)
-                        .contains(&v)
-                    {
-                        PRIORITY_URGENCY_UPPER_BOUND
-                    } else {
-                        v as u8
-                    }
-                },
-
-                None => return Err(Error::Done),
-            },
-
+            Some(sfv::ListEntry::Item(item)) => eps_parse_urgency(Some(&item.bare_item))?,
             Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-
             // Omitted so use default value.
-            None => PRIORITY_URGENCY_DEFAULT,
+            None => eps_parse_urgency(None)?,
         };
 
         let incremental = match dict.get("i") {
             Some(sfv::ListEntry::Item(item)) =>
-                item.bare_item.as_bool().ok_or(Error::Done)?,
+		eps_parse_incremental(Some(&item.bare_item))?,
 
             // Omitted so use default value.
-            _ => false,
+             _ => eps_parse_incremental(None)?,
         };
 
-        Ok(Priority::new(urgency, incremental))
+	let weight = match dict.get("exp_w") {
+	    Some(sfv::ListEntry::Item(item)) => eps_parse_weight(Some(&item.bare_item))?,
+	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+	    // Omitted, let's use default
+	    None => eps_parse_weight(None)?,
+	};
+
+	let protection_ratio = match dict.get("exp_r") {
+	    Some(sfv::ListEntry::Item(item)) => eps_parse_protection_ratio(Some(&item.bare_item))?,
+	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+	    // Omitted, let's use default
+	    None => eps_parse_protection_ratio(None)?,
+	};
+
+	let burst_loss_tolerance = match dict.get("exp_b") {
+	    Some(sfv::ListEntry::Item(item)) => eps_parse_burst_loss_tolerance(Some(&item.bare_item))?,
+	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+	    // In case it's empty, use default
+	    None => eps_parse_burst_loss_tolerance(None)?,
+	};
+
+	let repair_delay_tolerance = match dict.get("exp_alpha") {
+	    Some(sfv::ListEntry::Item(item)) => eps_parse_repair_delay_tolerance(Some(&item.bare_item))?,
+	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+	    // Omitted, let's use default
+	    None => eps_parse_repair_delay_tolerance(None)?,
+	};
+
+	let id = match dict.get("exp_id") {
+	    Some(sfv::ListEntry::Item(item)) => eps_parse_id(Some(&item.bare_item))?,
+	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+	    // Omitted,
+	    None => eps_parse_id(None)?,
+	};
+	
+	prio.push(PriorityValues::new_experimental(
+	    urgency, incremental, weight,  id, protection_ratio, 
+	    burst_loss_tolerance,
+	    repair_delay_tolerance));
+
+	match dict.get("exp_p") {
+	    // no path attribute
+	    None => {},
+	    Some(sfv::ListEntry::Item(_)) => return Err(Error::Done),
+	    Some(sfv::ListEntry::InnerList(ilist)) => {
+		for item in &ilist.items {
+		    let id = item.bare_item.as_str().map(|v| v.to_owned());
+		    
+		    let urgency = eps_parse_urgency(item.params.get("u"))?;
+		    
+		    let incremental = eps_parse_incremental(item.params.get("i"))?;
+		    let weight = eps_parse_weight(item.params.get("exp_w"))?;
+		    let protection_ratio = eps_parse_protection_ratio(item.params.get("exp_r"))?;
+		    let burst_loss_tolerance = eps_parse_burst_loss_tolerance(item.params.get("exp_b"))?;
+		    let repair_delay_tolerance = eps_parse_repair_delay_tolerance(item.params.get("exp_alpha"))?;
+
+		    prio.push(PriorityValues::new_experimental(
+			urgency, incremental,
+			weight,
+			id, protection_ratio,
+			burst_loss_tolerance,
+			repair_delay_tolerance));
+		}
+	    }
+	}
+	Ok(Self::new_hierarchical(prio))
     }
 }
 
@@ -1061,11 +1275,12 @@ impl Connection {
 
         // Clamp and shift urgency into quiche-priority space
         let urgency = priority
+	    .0[0]
             .urgency
             .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
             PRIORITY_URGENCY_OFFSET;
 
-        conn.stream_priority(stream_id, urgency, priority.incremental)?;
+        conn.stream_priority(stream_id, urgency, priority.0[0].incremental)?;
 
         self.send_headers(conn, stream_id, headers, fin)?;
 
@@ -1422,12 +1637,13 @@ impl Connection {
             self.control_stream_id.ok_or(Error::FrameUnexpected)?;
 
         let urgency = priority
+	    .0[0]
             .urgency
             .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND);
 
         let mut field_value = format!("u={urgency}");
 
-        if priority.incremental {
+        if priority.0[0].incremental {
             field_value.push_str(",i");
         }
 
@@ -3993,6 +4209,17 @@ mod tests {
 
         // Trailing comma in dict is malformed
         assert_eq!(Err(Error::Done), Priority::try_from(b"u=7, ".as_slice()));
+
+	// Hierarchical prio
+	assert_eq!(
+	    Ok(Priority::new_hierarchical(
+		vec!(
+		    // leaf
+		    PriorityValues::new_experimental(2, true, 600, None, 20, 0, 100),
+		    // middle layer
+		    PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))),
+	    Priority::try_from(b"u=2, exp_w=0.6, i, exp_r=0.02, exp_alpha=0.1, exp_p=(\"b\";u=3;i;exp_w=0.8)"
+			       .as_slice()));
     }
 
     #[test]
@@ -4000,12 +4227,10 @@ mod tests {
     fn priority_update_request() {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
+	let prio = Priority::new(3, false);
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &prio)
             .unwrap();
         s.advance().ok();
 
@@ -4018,23 +4243,19 @@ mod tests {
     fn priority_update_single_stream_rearm() {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
+	let prio = Priority::new(3, false);
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &prio)
             .unwrap();
         s.advance().ok();
 
         assert_eq!(s.poll_server(), Ok((0, Event::PriorityUpdate)));
         assert_eq!(s.poll_server(), Err(Error::Done));
 
+	let prio_new = Priority::new(5, false);
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 5,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &prio_new)
             .unwrap();
         s.advance().ok();
 
@@ -4045,11 +4266,10 @@ mod tests {
         assert_eq!(s.server.take_last_priority_update(0), Ok(b"u=5".to_vec()));
         assert_eq!(s.server.take_last_priority_update(0), Err(Error::Done));
 
+	let prio_new_new = Priority::new(7, false);
+
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 7,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &prio_new_new)
             .unwrap();
         s.advance().ok();
 
@@ -4066,34 +4286,27 @@ mod tests {
     fn priority_update_request_multiple_stream_arm_multiple_flights() {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
-
+	let prio_mid = Priority::new(3, false);
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &prio_mid)
             .unwrap();
         s.advance().ok();
 
         assert_eq!(s.poll_server(), Ok((0, Event::PriorityUpdate)));
         assert_eq!(s.poll_server(), Err(Error::Done));
+	let prio_low = Priority::new(1, false);
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 4, &Priority {
-                urgency: 1,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 4, &prio_low)
             .unwrap();
         s.advance().ok();
 
         assert_eq!(s.poll_server(), Ok((4, Event::PriorityUpdate)));
         assert_eq!(s.poll_server(), Err(Error::Done));
+	let prio_mid_low = Priority::new(2, false);
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 8, &Priority {
-                urgency: 2,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 8, &prio_mid_low)
             .unwrap();
         s.advance().ok();
 
@@ -4162,12 +4375,10 @@ mod tests {
     fn priority_update_request_collected_completed() {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
+	let prio = Priority::new(3, false);
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &prio)
             .unwrap();
         s.advance().ok();
 
@@ -4199,10 +4410,7 @@ mod tests {
 
         // Now send a PRIORITY_UPDATE for the completed request stream.
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &prio)
             .unwrap();
         s.advance().ok();
 
@@ -4216,12 +4424,10 @@ mod tests {
     fn priority_update_request_collected_stopped() {
         let mut s = Session::new().unwrap();
         s.handshake().unwrap();
-
+	let prio = Priority::new(3, false);
+	
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &prio)
             .unwrap();
         s.advance().ok();
 
@@ -4255,10 +4461,7 @@ mod tests {
 
         // Now send a PRIORITY_UPDATE for the closed request stream.
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(&mut s.pipe.client, 0, &prio)
             .unwrap();
         s.advance().ok();
 
