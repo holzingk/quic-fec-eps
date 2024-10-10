@@ -1,9 +1,11 @@
 [workspace]
-members = [ "apps", "octets", "qlog", "quiche" ]
+members = [ "apps", "octets", "qlog", "moeprlnc", "quiche" ]
 exclude = [ "fuzz", "tools/http3_test" ]
+resolver = "2"
 
 [profile.bench]
 debug = true
 
 [profile.release]
 debug = true
+

@@ -329,6 +329,7 @@ impl StreamMap {
     /// If the stream was already in the list, this does nothing.
     pub fn insert_readable(&mut self, priority_key: &Arc<StreamPriorityKey>) {
         if !priority_key.readable.is_linked() {
+	    trace!("Add to readable");
             self.readable.insert(Arc::clone(priority_key));
         }
     }
@@ -338,7 +339,7 @@ impl StreamMap {
         if !priority_key.readable.is_linked() {
             return;
         }
-
+	trace!("Remove from readable");
         let mut c = {
             let ptr = Arc::as_ptr(priority_key);
             unsafe { self.readable.cursor_mut_from_ptr(ptr) }
@@ -669,6 +670,9 @@ pub struct Stream {
     pub incremental: bool,
 
     pub priority_key: Arc<StreamPriorityKey>,
+
+    /// Whether the stream needs FEC protection
+    pub fec: bool,
 }
 
 impl Stream {
@@ -691,6 +695,7 @@ impl Stream {
             urgency: priority_key.urgency,
             incremental: priority_key.incremental,
             priority_key,
+	    fec: false,
         }
     }
 

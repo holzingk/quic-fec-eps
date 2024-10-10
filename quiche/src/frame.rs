@@ -46,6 +46,7 @@ pub const MAX_CRYPTO_OVERHEAD: usize = 8;
 pub const MAX_DGRAM_OVERHEAD: usize = 2;
 pub const MAX_STREAM_OVERHEAD: usize = 12;
 pub const MAX_STREAM_SIZE: u64 = 1 << 62;
+pub const MAX_REPAIR_SYMBOL_OVERHEAD: usize = 4 + 3 * 8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EcnCounts {
@@ -200,6 +201,47 @@ pub enum Frame {
         dcid_seq_num: u64,
         seq_num: u64,
     },
+
+    Repair {
+	fec_session: u64,
+	smallest_sid: u64,
+	highest_sid: u64,
+	seed: u64,
+	len: u64,
+	data: Vec<u8>,
+    },
+
+    RepairHeader {
+	fec_session: u64,
+	smallest_sid: u64,
+	highest_sid: u64,
+	seed: u64,
+	len: u64,
+    },
+    
+    SourceSymbolHeader {
+	fec_session: u64,
+	sid: u64,
+	length: u64
+    },
+    
+    SourceSymbol {
+	fec_session: u64,
+	sid: u64,
+	length: u64,
+	fec_protected_payload: Vec<u8>,
+    },
+
+    SymbolAck {
+	fec_session: u64,
+	next_source_symbol: u64,
+    },
+
+    FECWindow{
+	fec_session: u64,
+	fec_window_epoch: u64,
+	fec_window_size: u64,
+    },
 }
 
 impl Frame {
@@ -207,7 +249,7 @@ impl Frame {
         b: &mut octets::Octets, pkt: packet::Type,
     ) -> Result<Frame> {
         let frame_type = b.get_varint()?;
-
+	trace!("Frame type {frame_type:x}");
         let frame = match frame_type {
             0x00 => {
                 let mut len = 1;
@@ -347,7 +389,55 @@ impl Frame {
                 dcid_seq_num: b.get_varint()?,
                 seq_num: b.get_varint()?,
             },
+	    
+	    0x32a80fec => {
+		let fec_session = b.get_varint()?;
+		let smallest_sid = b.get_varint()?;
+		let highest_sid = b.get_varint()?;
+		let seed = b.get_varint()?;
+		let len = b.get_varint()?;
+		let data = Vec::from(b.get_bytes(len as usize)?.buf());
+		trace!("Parsing repair symbol fec_session {fec_session}, smallest sid {smallest_sid}, highest sid {highest_sid}, len {len}");
+		Frame::Repair {
+		    fec_session,
+		    smallest_sid,
+		    highest_sid,
+		    seed,
+		    len,
+		    data,
+		}
+	    },
 
+	    0x32a80fec55 => {
+		let fec_session = b.get_varint()?;
+		let sid = b.get_varint()?;
+		let length = b.get_varint()?;
+		trace!("Creating SourceSymbol SID {sid} LENGTH {length}, Offset {}, b cap {}", b.off(), b.cap());
+		let fec_protected_payload =  Vec::from(b.peek_bytes(length as usize)?.buf());
+		Frame::SourceSymbol {
+		    fec_session,
+		    sid,
+		    length,
+		    fec_protected_payload,
+		}
+	    }
+
+	    0x32a80fecac => {
+		let fec_session = b.get_varint()?;
+		let next_source_symbol = b.get_varint()?;
+		trace!("Decoded SymbolAck {next_source_symbol}");
+		Frame::SymbolAck {
+		    fec_session,
+		    next_source_symbol,
+		}
+	    },
+
+	    0x32a80fecc0 => Frame::FECWindow {
+		fec_session: b.get_varint()?,
+		fec_window_epoch: b.get_varint()?,
+		fec_window_size: b.get_varint()?,
+	    },
+	    
             _ => return Err(Error::InvalidFrame),
         };
 
@@ -637,6 +727,62 @@ impl Frame {
                 b.put_varint(*dcid_seq_num)?;
                 b.put_varint(*seq_num)?;
             },
+
+	    Frame::Repair {
+		fec_session,
+		smallest_sid,
+		highest_sid,
+		seed,
+		len,
+		data
+	    } => {
+		trace!("Writing RepairSymbol to bytes, smallest sid {}, highest sid {}, len {}",
+		       *smallest_sid, *highest_sid, *len);
+		b.put_varint(0x32a80fec)?;
+		b.put_varint(*fec_session)?;
+		b.put_varint(*smallest_sid)?;
+		b.put_varint(*highest_sid)?;
+		b.put_varint(*seed)?;
+		b.put_varint(*len)?;
+		b.put_bytes(data.as_ref())?;
+	    },
+
+	    Frame::RepairHeader {
+		..
+	    } => {
+		unreachable!();
+	    },
+
+	    Frame::SourceSymbolHeader {
+		..
+	    } => {},
+	    
+	    Frame::SourceSymbol {
+		..
+	    } => {
+		unimplemented!();
+	    },
+
+	    Frame::SymbolAck {
+		fec_session,
+		next_source_symbol,
+	    } => {
+		trace!("Writing SymbolAck fec_session {fec_session}: {next_source_symbol}");
+		b.put_varint(0x32a80fecac)?;
+		b.put_varint(*fec_session)?;
+		b.put_varint(*next_source_symbol)?;
+	    },
+
+	    Frame::FECWindow {
+		fec_session,
+		fec_window_epoch,
+		fec_window_size,
+	    } => {
+		b.put_varint(0x32a80fecc0)?;
+		b.put_varint(*fec_session)?;
+		b.put_varint(*fec_window_epoch)?;
+		b.put_varint(*fec_window_size)?;
+	    },
         }
 
         Ok(before - b.cap())
@@ -862,9 +1008,89 @@ impl Frame {
                 seq_num,
             } => {
                 4 + // frame size
-                octets::varint_len(*dcid_seq_num) +
-                octets::varint_len(*seq_num)
+                    octets::varint_len(*dcid_seq_num) +
+                    octets::varint_len(*seq_num)
             },
+	    
+	    Frame::Repair {
+		fec_session,
+		smallest_sid,
+		highest_sid,
+		seed,
+		len,
+		data,
+		
+	    } => {
+		4 + // frame type
+		    octets::varint_len(*fec_session) +
+		    octets::varint_len(*smallest_sid) + 
+		    octets::varint_len(*highest_sid) +
+		    octets::varint_len(*seed) +
+		    octets::varint_len(*len) +		
+		    data.len() // data
+	    },
+
+	    Frame::RepairHeader {
+		fec_session,
+		smallest_sid,
+		highest_sid,
+		seed,
+		len
+	    } => {
+		4 +
+		    octets::varint_len(*fec_session) +
+		    octets::varint_len(*smallest_sid) + 
+		    octets::varint_len(*highest_sid) +
+		    octets::varint_len(*seed) +
+		    octets::varint_len(*len)
+	    },
+
+	    Frame::SourceSymbolHeader {
+		fec_session,
+		sid,
+		length: _
+	    } => {
+		8 + //frame type
+		    octets::varint_len(*fec_session) +
+		    octets::varint_len(*sid) +
+		    2// + //length always 2 byte encoded
+		    //*length as usize)))
+	    },
+		
+
+	    Frame::SourceSymbol {
+		fec_session,
+		sid,
+		length,
+		fec_protected_payload: _,
+	    } => {
+		4 + // frame type
+		    octets::varint_len(*fec_session) + 
+		    octets::varint_len(*sid) +
+		    2 + //always 2 byte varint
+		    *length as usize //+
+//		    fec_protected_payload.len()
+	    },
+
+	    Frame::SymbolAck {
+		fec_session,
+		next_source_symbol
+	    } => {
+		4 + // frame type
+		    octets::varint_len(*fec_session) +
+		    octets::varint_len(*next_source_symbol)
+	    },
+
+	    Frame::FECWindow {
+		fec_session,
+		fec_window_epoch,
+		fec_window_size,
+	    } => {
+		4 + // frame type
+		    octets::varint_len(*fec_session) +
+		    octets::varint_len(*fec_window_epoch) +
+		    octets::varint_len(*fec_window_size)
+	    }
         }
     }
 
@@ -873,10 +1099,11 @@ impl Frame {
         !matches!(
             self,
             Frame::Padding { .. } |
-                Frame::ACK { .. } |
-                Frame::ApplicationClose { .. } |
-                Frame::ConnectionClose { .. } |
-                Frame::ACKMP { .. }
+            Frame::ACK { .. } |
+            Frame::ApplicationClose { .. } |
+            Frame::ConnectionClose { .. } |
+            Frame::ACKMP { .. } |
+	    Frame::SymbolAck { .. }
         )
     }
 
@@ -1134,6 +1361,12 @@ impl Frame {
                 dcid_seq_num: *dcid_seq_num,
                 seq_num: *seq_num,
             },
+
+	    _ => QuicFrame::Unknown{
+	     	raw_frame_type: 0,
+		frame_type_value: None,
+		raw: None
+	    },
         }
     }
 }
@@ -1346,6 +1579,60 @@ impl std::fmt::Debug for Frame {
                     "PATH_AVAILABLE dcid_seq_num={dcid_seq_num:x} seq_num={seq_num:x}",
                 )?
             },
+
+	    Frame::Repair {
+		fec_session,
+		smallest_sid: _,
+		highest_sid: _,
+		seed: _,
+		len: _,
+		data,
+	    } => {
+		write!(f, "REPAIR fec_session={} len={}", fec_session, data.len())?;
+	    },
+
+	    Frame::RepairHeader {
+		fec_session,
+		smallest_sid: _,
+		highest_sid: _,
+		seed: _,
+		len,
+	    } => {
+		write!(f, "REPAIR fec_session={} len={}", fec_session, len)?;
+	    },
+
+
+	    Frame::SourceSymbolHeader {
+		fec_session,
+		sid,
+		length
+	    } => {
+		write!(f, "SourceSymbolHeader fec_session={fec_session} sid={sid}, length={length}")?;
+	    },
+	    
+	    Frame::SourceSymbol {
+		fec_session,
+		sid,
+		length,
+		fec_protected_payload: _,
+	    } => {
+		write!(f, "SourceSymbol fec_session={fec_session} sid={sid}, length={length}")?;
+	    },
+
+	    Frame::SymbolAck {
+		fec_session,
+		next_source_symbol
+	    } => {
+		write!(f, "SYMBOL ACK fec_session={fec_session} next_source_symbol={next_source_symbol:x}")?;
+	    },
+
+	    Frame::FECWindow {
+		fec_session,
+		fec_window_epoch,
+		fec_window_size,
+	    } => {
+		write!(f, "FEC WINDOW fec_session={fec_session} fec_window_epoch={fec_window_epoch:x}, fec_window_size={fec_window_size:x}")?;
+	    },
         }
 
         Ok(())
@@ -1508,6 +1795,18 @@ pub fn encode_crypto_header(
     // Always encode length field as 2-byte varint.
     b.put_varint_with_len(length, 2)?;
 
+    Ok(())
+}
+
+pub fn encode_source_symbol_header(
+    fec_session: u64,
+    sid: u64, length: usize, b: &mut octets::OctetsMut 
+) -> Result<()> {
+    b.put_varint(0x32a80fec55)?;
+    b.put_varint(fec_session)?;
+    b.put_varint(sid)?;
+    // Always encode length field as 2-byte varint.
+    b.put_varint_with_len(length as u64, 2)?;
     Ok(())
 }
 

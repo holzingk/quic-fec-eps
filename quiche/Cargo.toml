@@ -69,6 +69,12 @@ qlog = { version = "0.9", path = "../qlog", optional = true }
 sfv = { version = "0.9", optional = true }
 num-traits = { version = "0.2.19" }
 smallvec = { version = "1.10", features = ["serde", "union"] }
+env_logger = "*"
+moeprlnc = { path = "../moeprlnc" }
+aligned-vec = "0.6"
+rand = "0.8.5"
+rand_pcg = "0.3"
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef", "ws2tcpip"] }
@@ -76,6 +82,7 @@ winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef", "ws2tc
 [dev-dependencies]
 mio = { version = "0.8", features = ["net", "os-poll"] }
 url = "1"
+rand = "0.8.5"
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]

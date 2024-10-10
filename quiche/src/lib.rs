@@ -414,8 +414,11 @@ use std::str::FromStr;
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::collections::HashMap;
 
 use smallvec::SmallVec;
+
+use crate::fec::{Tetrys, Symbol, SymbolKind, ReliabilityLevel};
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -674,7 +677,7 @@ pub struct ConnectionError {
     pub reason: Vec<u8>,
 }
 
-/// The side of the stream to be shut down.
+/// The side of the stream to be shut down..
 ///
 /// This should be used when calling [`stream_shutdown()`].
 ///
@@ -1062,7 +1065,7 @@ impl Config {
         self.local_transport_params.initial_max_stream_data_uni = v;
     }
 
-    /// Sets the `initial_max_streams_bidi` transport parameter.
+    /// Sets the `initial_max_streams_bidi` transport parameter.fec
     ///
     /// When set to a non-zero value quiche will only allow `v` number of
     /// concurrent remotely-initiated bidirectional streams to be open at any
@@ -1138,6 +1141,14 @@ impl Config {
     /// The default value is `false`.
     pub fn set_multipath(&mut self, v: bool) {
         self.local_transport_params.enable_multipath = v;
+    }
+
+    /// Sets the `enable_fec` transport parameter, negotiating the usage
+    /// of the FEC extension
+    ///
+    /// The default value is `false`. 
+    pub fn set_fec(&mut self, v: bool) {
+	self.local_transport_params.enable_fec = v;
     }
 
     /// Sets the congestion control algorithm used by string.
@@ -1446,6 +1457,13 @@ pub struct Connection {
 
     /// Structure used when coping with abandoned paths in multipath.
     dcid_seq_to_abandon: VecDeque<u64>,
+
+    /// Indicates wether fec was negotiated in this connection
+    fec_enabled: bool,
+
+    /// State of the FEC
+    fec: HashMap<u64, Tetrys>,
+
 }
 
 /// Creates a new server-side connection.
@@ -1877,6 +1895,10 @@ impl Connection {
             newly_acked: Vec::new(),
 
             dcid_seq_to_abandon: VecDeque::new(),
+
+	    fec_enabled: false,
+
+	    fec: HashMap::new(),
         };
 
         // Don't support multipath with zero-length CIDs.
@@ -2601,7 +2623,7 @@ impl Connection {
             hdr,
             payload_len,
             pn,
-            AddrTupleFmt(info.from, info.to)
+            AddrTupleFmt(info.from, info.to),
         );
 
         #[cfg(feature = "qlog")]
@@ -2651,7 +2673,6 @@ impl Connection {
                 aead = &aead_next.as_ref().unwrap().0;
             }
         }
-
         let mut payload = packet::decrypt_pkt(
             &mut b,
             space_id as u32,
@@ -2663,7 +2684,6 @@ impl Connection {
         .map_err(|e| {
             drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id)
         })?;
-
         let pkt_num_space = self
             .pkt_num_spaces
             .spaces
@@ -2672,12 +2692,10 @@ impl Connection {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
             return Err(Error::Done);
         }
-
         // Packets with no frames are invalid.
         if payload.cap() == 0 {
             return Err(Error::InvalidPacket);
         }
-
         // Now that we decrypted the packet, let's see if we can map it to an
         // existing path.
         let recv_pid = if hdr.ty == packet::Type::Short && self.got_peer_conn_id {
@@ -2685,6 +2703,7 @@ impl Connection {
             self.get_or_create_recv_path_id(recv_pid, &pkt_dcid, buf_len, info)?
         } else {
             // During handshake, we are on the initial path.
+	    trace!("Initial path!");
             self.paths.get_active_path_id()?
         };
 
@@ -2805,11 +2824,23 @@ impl Connection {
         // To know if the peer migrated the connection, we need to keep track
         // whether this is a non-probing packet.
         let mut probing = true;
-
         // Process packet payload.
         while payload.cap() > 0 {
-            let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
-
+	    trace!("{} Processing payload from bytes {} left", self.trace_id, payload.cap());
+	    let mut outer_frame = None;
+	    let frame;
+	    // in the case of embedded frames, e.g., SourceSymbol, the buffer will only be advanced to the embedded frame (e.g. using peek_bytes)
+            let frame_temp = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
+	    if matches!(frame_temp, frame::Frame::SourceSymbol{..}) {
+		trace!("{} is a SourceSymbol frame, also creating embedded frame, remaining cap {}", self.trace_id, payload.cap());
+		outer_frame = Some(frame_temp);
+		// process embedded frame
+		frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
+		trace!("{} remaining cap in payload: {}", self.trace_id, payload.cap());
+		       
+	    } else {
+		frame = frame_temp;
+	    }
             qlog_with_type!(QLOG_PACKET_RX, self.qlog, _q, {
                 qlog_frames.push(frame.to_qlog());
             });
@@ -2821,13 +2852,57 @@ impl Connection {
             if !frame.probing() {
                 probing = false;
             }
-
+	    if outer_frame.is_some() {
+		trace!("{} Processing outer SourceSymbol frame", self.trace_id);
+		if let Err(e) = self.process_frame(outer_frame.unwrap(), &hdr, recv_pid, epoch, now)
+		{
+		    trace!("{} Frame processing error {:?} while processing outer frame", self.trace_id, e);
+                    frame_processing_err = Some(e);
+                    break;
+		}
+	    }
+	    trace!("Processing Frame {:?}", frame);
             if let Err(e) = self.process_frame(frame, &hdr, recv_pid, epoch, now)
             {
+		trace!("{} Frame processing error {:?} while processing", self.trace_id, e);
                 frame_processing_err = Some(e);
                 break;
             }
         }
+
+	// Try to restore frames using FEC
+	let mut restored = Vec::new();
+	for (_, tetrys) in self.fec.iter_mut() {
+	    restored.append(&mut tetrys.decoder.try_decode());
+	}
+	// Process restored frames
+	for restored_symbol in restored {
+	    let mut restored_octet = octets::Octets::with_slice(restored_symbol.as_slice());
+	    let frame = frame::Frame::from_bytes(
+		&mut restored_octet,
+		packet::Type::Short)?;
+	    
+	    qlog_with_type!(QLOG_PACKET_RX, self.qlog, _q, {
+                qlog_frames.push(frame.to_qlog());
+	    });
+
+	    if frame.ack_eliciting() {
+                ack_elicited = true;
+	    }
+
+	    if !frame.probing() {
+                probing = false;
+	    }
+	    trace!("{} Processing restored Frame {:?}", self.trace_id, frame);
+	    // header, recv_pid, epoch, now is not really critical (so far only source symbols are protected)
+	    if let Err(e) = self.process_frame(frame, &hdr, recv_pid, epoch, now)
+	    {
+		trace!("Frame processing error while restoring");
+                frame_processing_err = Some(e);
+                break;
+	    }
+	}
+
 
         qlog_with_type!(QLOG_PACKET_RX, self.qlog, q, {
             let packet_size = b.len();
@@ -3404,6 +3479,7 @@ impl Connection {
         &mut self, out: &mut [u8], send_pid: usize, has_initial: bool,
         now: time::Instant,
     ) -> Result<(packet::Type, usize)> {
+	trace!("{} Trying to send something", &self.trace_id,);
         if out.is_empty() {
             return Err(Error::BufferTooShort);
         }
@@ -3428,6 +3504,7 @@ impl Connection {
 
         let multiple_application_data_pkt_num_spaces =
             self.use_path_pkt_num_space(epoch);
+
         // Process lost frames. There might be several paths having lost frames.
         for (_, p) in self.paths.iter_mut() {
             for lost in p.recovery.lost[epoch].drain(..) {
@@ -3454,6 +3531,12 @@ impl Connection {
                         fin,
                     } => {
                         let stream = match self.streams.get_mut(stream_id) {
+			    // Do not retransmit lost fec protected stream frames
+			    Some(v) if v.fec => {
+				trace!("StreamHeader detected as lost, but relying on FEC for recovery");
+				continue
+			    },
+			    
                             Some(v) => v,
 
                             None => continue,
@@ -3541,11 +3624,18 @@ impl Connection {
                             .ok();
                     },
 
-                    _ => (),
+		    // Inform FEC about detected symbol loss
+                    frame::Frame::SourceSymbolHeader { fec_session, .. } | frame::Frame::Repair { fec_session, .. } => {
+			if self.fec.get_mut(&fec_session).map(|tetrys| tetrys.encoder.on_detected_loss()).is_none() {
+			    warn!("Detected loss of unknown fec session {fec_session}");
+			}
+		    },
+
+		    // Ignore the rest
+		    _ => {},
                 }
             }
         }
-
         let consider_standby_paths = self.paths.consider_standby_paths();
         let is_app_limited = self.delivery_rate_check_if_app_limited(send_pid);
         let n_paths = self.paths.len();
@@ -3612,11 +3702,11 @@ impl Connection {
 
         hdr.to_bytes(&mut b)?;
 
-        let hdr_trace = if log::max_level() == log::LevelFilter::Trace {
-            Some(format!("{hdr:?}"))
-        } else {
-            None
-        };
+        // let hdr_trace = if log::max_level() == log::LevelFilter::Trace {
+        //     Some(format!("{hdr:?}"))
+        // } else {
+        //     None
+        // };
 
         let hdr_ty = hdr.ty;
 
@@ -3692,6 +3782,9 @@ impl Connection {
 
         let left_before_packing_ack_frame = left;
 
+	// When we send ACK or ACKMP frame we also send SymbolACK frame if required
+	let mut add_symbol_ack_frame = false;
+	
         // Create ACK frame.
         //
         // When we need to explicitly elicit an ACK via PING later, go ahead and
@@ -3730,6 +3823,7 @@ impl Connection {
                 // available cwnd.
                 if push_frame_to_pkt!(b, frames, frame, left) {
                     pkt_space.ack_elicited = false;
+		    add_symbol_ack_frame = true;
                 }
             }
         }
@@ -3767,6 +3861,7 @@ impl Connection {
                     if push_frame_to_pkt!(b, frames, frame, left) {
                         pns.ack_elicited = false;
                         wrote_ack_mp = true;
+			add_symbol_ack_frame = true;
                     }
                 }
                 if wrote_ack_mp {
@@ -3821,6 +3916,7 @@ impl Connection {
                                 } else {
                                     pns.ack_elicited = false;
                                 }
+				add_symbol_ack_frame = true;
                             }
                         }
                     }
@@ -3837,8 +3933,16 @@ impl Connection {
             cwnd_available.saturating_sub(left_before_packing_ack_frame - left),
         );
 
+	// SymbolAck
+	if add_symbol_ack_frame && pkt_type == packet::Type::Short {
+	    for (fec_session, tetrys) in self.fec.iter_mut() {
+		let next_source_symbol = tetrys.decoder.get_ack();
+		let frame = frame::Frame::SymbolAck { fec_session: *fec_session, next_source_symbol };
+		push_frame_to_pkt!(b, frames, frame, left);
+	    }
+	}
+	
         let mut challenge_data = None;
-
         if pkt_type == packet::Type::Short {
             // Create PATH_RESPONSE frame if needed.
             // We do not try to ensure that these are really sent.
@@ -4145,7 +4249,7 @@ impl Connection {
                 }
             }
         }
-
+	let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
         let path = self.paths.get_mut(send_pid)?;
 
         // Create CONNECTION_CLOSE frame. Try to send this only on the active
@@ -4254,6 +4358,60 @@ impl Connection {
             }
         }
 
+	// Check streams that have no data, and inform FEC about potential app limited period
+	for writable_stream_id in self.streams.writable() {
+	    let writable_stream = self.streams.get(writable_stream_id).unwrap();
+	    
+	    // if there are no outstanding data
+	    if !writable_stream.send.ready() {
+		self.fec.get_mut(&writable_stream_id).map(|tetrys| tetrys.encoder.notify_flushed());
+	    }
+	}
+	
+	//  In case repair information can be sent, include it in the packet
+	trace!("Checking if repair symbols can be sent");
+	if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
+	    !is_closing && path.active()
+	{
+	    for (fec_session, tetrys) in self.fec.iter_mut() {
+		if tetrys.encoder.should_send_next() == SymbolKind::Repair {
+
+		    let rs = tetrys.encoder
+			.generate_repair_symbol()
+			.expect("If we should send, it must be able to generate");
+
+		    let len = tetrys.encoder.get_repair_symbol_len();
+		    let highest_sid = rs.get_largest_symbol_id();
+		    let repair_frame = frame::Frame::Repair {
+			fec_session: *fec_session,
+			smallest_sid: rs.get_smallest_symbol_id(),
+			highest_sid,
+			seed: rs.get_seed() as u64,
+			len: len as u64,
+			data: rs.get_payload_aligned_as_ref()[..len].to_vec(),
+		    };
+		    if repair_frame.wire_len() <= left {
+			trace!("{} Pushing repair frame to packet: smallest_sid {}, highest_sid {}, seed {}, len {}",
+			       self.trace_id,
+			       rs.get_smallest_symbol_id(),
+			       rs.get_largest_symbol_id(),
+			       rs.get_seed() as u64,
+			       len);
+			if push_frame_to_pkt!(b, frames, repair_frame, left) {
+			    ack_eliciting = true;
+			    in_flight = true;
+			    tetrys.encoder.put_repair_symbol_in_flight(highest_sid);
+			}
+		    } else {
+			trace!("{} Not enough space {left} left for this repair symbol {}", self.trace_id, repair_frame.wire_len());
+		    }
+		}
+	    }
+	}
+
+
+		    
+	
         // The preference of data-bearing frame to include in a packet
         // is managed by `self.emit_dgram`. However, whether any frames
         // can be sent depends on the state of their buffers. In the case
@@ -4347,10 +4505,16 @@ impl Connection {
                 }
             }
         }
-
+	
+	let header_overhead = if self.fec_enabled {
+	    frame::MAX_STREAM_OVERHEAD + frame::MAX_REPAIR_SYMBOL_OVERHEAD
+	} else {
+	    frame::MAX_STREAM_OVERHEAD
+	};
+	
         // Create a single STREAM frame for the first stream that is flushable.
         if (pkt_type == packet::Type::Short || pkt_type == packet::Type::ZeroRTT) &&
-            left > frame::MAX_STREAM_OVERHEAD &&
+            left > header_overhead &&
             !is_closing &&
             path.active() &&
             !dgram_emitted &&
@@ -4370,6 +4534,25 @@ impl Connection {
                     },
                 };
 
+		let mut next_sid = None;
+		if stream.fec {
+		    self.fec.entry(stream_id).or_insert(
+			Tetrys::new(fec_payload_length)
+			    .unwrap());
+		    next_sid = Some(self.fec.get_mut(&stream_id).unwrap().encoder.get_next_sid());
+		}
+		
+		// In case of fec enabled stream, encode the stream frame inside source symbol frame
+		let fec_hdr_len = if stream.fec {
+		    8 + // frame type
+			// fec sessoin
+			octets::varint_len(stream_id) +
+			octets::varint_len(next_sid.unwrap()) +
+			2 // Always encode length field as 2-byte varint.
+		} else {
+		    0
+		};
+		
                 let stream_off = stream.send.off_front();
 
                 // Encode the frame.
@@ -4386,36 +4569,50 @@ impl Connection {
                 // Finally we go back and encode the frame header with the now
                 // available information.
                 let hdr_off = b.off();
-                let hdr_len = 1 + // frame type
+		let stream_hdr_len = 1 + // frame type
                     octets::varint_len(stream_id) + // stream_id
                     octets::varint_len(stream_off) + // offset
                     2; // length, always encode as 2-byte varint
 
-                let max_len = match left.checked_sub(hdr_len) {
+		let max_repair_header_len = if self.fec_enabled {
+		    frame::MAX_REPAIR_SYMBOL_OVERHEAD
+		} else {
+		    0
+		};
+								  
+//		let additional_space = max_repair_header_len - stream_hdr_len;
+
+		let hdr_len = fec_hdr_len + stream_hdr_len;
+		    
+		trace!("fec_hdr_len {fec_hdr_len}, hdr_len {hdr_len}, hdr_off {hdr_off}");
+                let max_len = match left.checked_sub(hdr_len + max_repair_header_len) {
                     Some(v) => v,
                     None => {
                         let priority_key = Arc::clone(&stream.priority_key);
                         self.streams.remove_flushable(&priority_key);
-
+			trace!("hdr_len {hdr_len} is too long");
                         continue;
                     },
                 };
-
-                let (mut stream_hdr, mut stream_payload) =
+                let (mut source_symbol_and_stream_hdr, mut stream_payload) =
                     b.split_at(hdr_off + hdr_len)?;
-
+		let (mut source_symbol_hdr, mut stream_hdr) =
+		    source_symbol_and_stream_hdr.split_at(hdr_off + fec_hdr_len)?;
+//		trace!("Max len would be {max_len}, reserving addition space {additional_space}");
                 // Write stream data into the packet buffer.
                 let (len, fin) =
-                    stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
-
+                    stream.send.emit(&mut stream_payload.as_mut()[..(max_len)])?;
                 // Encode the frame's header.
                 //
                 // Due to how `OctetsMut::split_at()` works, `stream_hdr` starts
                 // from the initial offset of `b` (rather than the current
                 // offset), so it needs to be advanced to the initial frame
                 // offset.
-                stream_hdr.skip(hdr_off)?;
-
+		source_symbol_hdr.skip(hdr_off)?;
+		if stream.fec {
+		    trace!("{} Encode source symbol header sid {}, length {}", self.trace_id, next_sid.unwrap(), stream_hdr_len + len);
+		    frame::encode_source_symbol_header(stream_id, next_sid.unwrap(), stream_hdr_len + len, &mut source_symbol_hdr)?;
+		}
                 frame::encode_stream_header(
                     stream_id,
                     stream_off,
@@ -4423,22 +4620,37 @@ impl Connection {
                     fin,
                     &mut stream_hdr,
                 )?;
+		trace!("Encoded Stream {stream_id}, offset: {stream_off}, len: {len}");
+		// Add to source symbols
+		if stream.fec {
+		    self.fec.get_mut(&stream_id)
+			.unwrap()
+			.encoder
+			.add_source_symbol(&b.as_ref()[fec_hdr_len..(fec_hdr_len + stream_hdr_len + len)]).unwrap();
+		}
 
-                // Advance the packet buffer's offset.
+		// Advance the packet buffer's offset.
                 b.skip(hdr_len + len)?;
-
-                let frame = frame::Frame::StreamHeader {
-                    stream_id,
-                    offset: stream_off,
-                    length: len,
-                    fin,
+		
+		if stream.fec {
+		    let frame = frame::Frame::SourceSymbolHeader {
+			fec_session: stream_id,
+			sid: next_sid.unwrap(),
+			length: (stream_hdr_len + len) as u64
+		    };
+		    push_frame_to_pkt!(b, frames, frame, left);
+		}
+		let frame = frame::Frame::StreamHeader {
+		    stream_id,
+		    offset: stream_off,
+		    length: len,
+		    fin,
                 };
-
-                if push_frame_to_pkt!(b, frames, frame, left) {
-                    ack_eliciting = true;
-                    in_flight = true;
-                    has_data = true;
-                }
+		if push_frame_to_pkt!(b, frames, frame, left) {
+		    ack_eliciting = true;
+		    in_flight = true;
+		    has_data = true;
+		}
 
                 let priority_key = Arc::clone(&stream.priority_key);
                 // If the stream is no longer flushable, remove it from the queue
@@ -4468,6 +4680,8 @@ impl Connection {
             left >= 1 &&
             !is_closing
         {
+	    trace!("Adding PING frame due to ack_elicit_required {ack_elicit_required}, path.needs_ack_eliciting {}",
+		   path.needs_ack_eliciting);
             let frame = frame::Frame::Ping;
 
             if push_frame_to_pkt!(b, frames, frame, left) {
@@ -4533,15 +4747,6 @@ impl Connection {
                 .put_varint_with_len(len as u64, PAYLOAD_LENGTH_LEN)?;
         }
 
-        trace!(
-            "{} tx pkt {} len={} pn={} {}",
-            self.trace_id,
-            hdr_trace.unwrap_or_default(),
-            payload_len,
-            pn,
-            AddrTupleFmt(path.local_addr(), path.peer_addr())
-        );
-
         #[cfg(feature = "qlog")]
         let mut qlog_frames: SmallVec<
             [qlog::events::quic::QuicFrame; 1],
@@ -4604,7 +4809,7 @@ impl Connection {
             None,
             aead,
         )?;
-
+	
         let pkt_num = recovery::SpacedPktNum::new(space_id as u32, pn);
 
         let sent_pkt = recovery::Sent {
@@ -5077,6 +5282,39 @@ impl Connection {
             .update_priority(&old_priority_key, &new_priority_key);
 
         Ok(())
+    }
+
+    /// Sets FEC properties of this stream
+    ///
+    /// The target stream is created if it did not exist before calling this
+    /// method.
+    /// If the use of FEC is not negotiated for this connection `Error::InvalidState` is returned.
+    pub fn stream_fec(
+	&mut self, stream_id: u64, enable: bool,
+	reliability_level: ReliabilityLevel
+    ) -> Result<()> {
+	if !self.fec_enabled {
+	    return Err(Error::InvalidState);
+	}
+	let stream = match self.get_or_create_stream(stream_id, true) {
+            Ok(v) => v,
+	    
+            Err(Error::Done) => return Ok(()),
+	    
+            Err(e) => return Err(e),
+        };
+	stream.fec = enable;
+
+	if stream.fec {
+	    let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
+	    self.fec.entry(stream_id).or_insert(
+		Tetrys::new(fec_payload_length)
+		    .unwrap());
+	    self.fec.get_mut(&stream_id).unwrap().
+		encoder.set_reliability_level(reliability_level);
+	}
+	
+	Ok(())
     }
 
     /// Shuts down reading or writing from/to the specified stream.
@@ -6832,6 +7070,12 @@ impl Connection {
             self.paths.set_multipath(true);
         }
 
+	if self.local_transport_params.enable_fec &&
+	    peer_params.enable_fec
+	{
+	    self.fec_enabled = true;
+	}
+
         self.peer_transport_params = peer_params;
 
         Ok(())
@@ -6927,7 +7171,7 @@ impl Connection {
     }
 
     /// Selects the packet type for the next outgoing packet.
-    fn write_pkt_type(&self, send_pid: usize) -> Result<packet::Type> {
+    fn write_pkt_type(&mut self, send_pid: usize) -> Result<packet::Type> {
         // On error send packet in the latest epoch available, but only send
         // 1-RTT ones when the handshake is completed.
         if self
@@ -6994,6 +7238,7 @@ impl Connection {
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
         let send_path = self.paths.get(send_pid)?;
+	let repair_symbol_outstanding = self.fec.iter().any(|(_, tetrys)| tetrys.encoder.should_send_next() == SymbolKind::Repair);
         if (self.is_established() || self.is_in_early_data()) &&
             (self.should_send_handshake_done() ||
                 self.almost_full ||
@@ -7013,8 +7258,9 @@ impl Connection {
                 self.ids.has_retire_dcids() ||
                 self.paths.has_path_abandon() ||
                 self.paths.has_path_status() ||
-                send_path.needs_ack_eliciting ||
-                send_path.probing_required())
+             send_path.needs_ack_eliciting ||
+             send_path.probing_required() ||
+	     repair_symbol_outstanding)
         {
             // Only clients can send 0-RTT packets.
             if !self.is_server && self.is_in_early_data() {
@@ -7044,7 +7290,7 @@ impl Connection {
     /// Processes an incoming frame.
     fn process_frame(
         &mut self, frame: frame::Frame, hdr: &packet::Header,
-        recv_path_id: usize, epoch: packet::Epoch, now: time::Instant,
+        recv_path_id: usize, epoch: packet::Epoch, now: time::Instant
     ) -> Result<()> {
         trace!("{} rx frm {:?}", self.trace_id, frame);
 
@@ -7676,7 +7922,73 @@ impl Connection {
                     .path_id
                     .ok_or(Error::InvalidFrame)?;
                 self.paths.on_path_status_received(pid, seq_num, true);
+
             },
+	    frame::Frame::Repair {
+		fec_session,
+		smallest_sid,
+		highest_sid,
+		seed,
+		len: _,
+		data
+	    } => {
+		trace!("{} Processing repair frame", self.trace_id);
+		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
+		self.fec.entry(fec_session).or_insert(
+		    Tetrys::new(fec_payload_length)
+			.unwrap());
+		self.fec.get_mut(&fec_session).unwrap()
+		    .decoder.add_repair_symbol(smallest_sid,
+					       highest_sid,
+					       seed as u16,
+					       data.as_slice())
+		    .unwrap();
+	    },
+
+	    frame::Frame::RepairHeader {
+		..
+	    } => {
+		unreachable!();
+	    },
+
+	    frame::Frame::SourceSymbol {
+		fec_session,
+		sid,
+		length: _,
+		fec_protected_payload
+	    } => {
+		trace!("{} Received Source Symbol {sid}", self.trace_id);
+		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
+		self.fec.entry(fec_session).or_insert(
+		    Tetrys::new(fec_payload_length)
+			.unwrap());
+		self.fec.get_mut(&fec_session).unwrap()
+		    .decoder.add_source_symbol(sid, fec_protected_payload.as_slice()).unwrap();
+	    },
+
+	    frame::Frame::SourceSymbolHeader {
+		..
+	    } => {
+		unreachable!();
+	    },
+	    
+	    frame::Frame::SymbolAck {
+		fec_session,
+		next_source_symbol,
+	    } => {
+		trace!("{} received SymbolAck number {next_source_symbol}", self.trace_id);
+		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
+		self.fec.entry(fec_session).or_insert(
+		    Tetrys::new(fec_payload_length)
+			.unwrap());
+		self.fec.get_mut(&fec_session).unwrap().encoder.handle_ack(next_source_symbol);
+	    },
+	    
+	    frame::Frame::FECWindow {
+		..
+	    } => {
+		todo!("FEC Window epoch / size TBD");
+	    },
         };
         Ok(())
     }
@@ -7833,7 +8145,7 @@ impl Connection {
     ) -> Result<usize> {
         let (in_scid_seq, mut in_scid_pid) =
             self.ids.find_scid_seq(dcid).ok_or(Error::InvalidState)?;
-
+	
         if let Some(recv_pid) = recv_pid {
             // If the path observes a change of SCID used, note it.
             let recv_path = self.paths.get_mut(recv_pid)?;
@@ -8312,6 +8624,8 @@ pub struct TransportParams {
     pub max_datagram_frame_size: Option<u64>,
     /// Multipath extension parameter, if any.
     pub enable_multipath: bool,
+    /// Enable FEC
+    pub enable_fec: bool,
 }
 
 impl Default for TransportParams {
@@ -8335,6 +8649,7 @@ impl Default for TransportParams {
             retry_source_connection_id: None,
             max_datagram_frame_size: None,
             enable_multipath: false,
+	    enable_fec: false,
         }
     }
 }
@@ -8488,6 +8803,14 @@ impl TransportParams {
                 0x0f739bbc1b666d06 => {
                     tp.enable_multipath = true;
                 },
+
+		0x238ffece00 => {
+		    tp.enable_fec = false;
+		},
+
+		0x238ffece01 => {
+		    tp.enable_fec = true;
+		},
 
                 // Ignore unknown parameters.
                 _ => (),
@@ -8654,6 +8977,10 @@ impl TransportParams {
         if tp.enable_multipath {
             TransportParams::encode_param(&mut b, 0x0f739bbc1b666d06, 0)?;
         }
+
+	if tp.enable_fec {
+	    TransportParams::encode_param(&mut b, 0x238ffece01, 0)?;
+	}
 
         let out_len = b.off();
 
@@ -8935,17 +9262,29 @@ pub mod testing {
 
             while !client_done || !server_done {
                 match emit_flight(&mut self.client) {
-                    Ok(flight) => process_flight(&mut self.server, flight)?,
+                    Ok(flight) => {
+			trace!("Client is sending to server");
+			process_flight(&mut self.server, flight)?;
+		    },
 
-                    Err(Error::Done) => client_done = true,
-
+                    Err(Error::Done) => {
+			trace!("Client is done");
+			client_done = true;
+		},
+		    
                     Err(e) => return Err(e),
                 };
 
-                match emit_flight(&mut self.server) {
-                    Ok(flight) => process_flight(&mut self.client, flight)?,
+		match emit_flight(&mut self.server) {
+                    Ok(flight) => {
+			trace!("Server is sending to client");
+			process_flight(&mut self.client, flight)?;
+		    },
 
-                    Err(Error::Done) => server_done = true,
+		    Err(Error::Done) => {
+			trace!("Server is done");
+			server_done = true;
+		    },
 
                     Err(e) => return Err(e),
                 };
@@ -9266,7 +9605,12 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use std::sync::Once;
+    static LOGGER_INIT: Once = Once::new();
+    
+    fn logger_setup() {
+	LOGGER_INIT.call_once(|| { env_logger::try_init().ok(); });
+    }
     #[test]
     fn transport_params() {
         // Server encodes, client decodes.
@@ -9289,12 +9633,13 @@ mod tests {
             retry_source_connection_id: Some(b"retry".to_vec().into()),
             max_datagram_frame_size: Some(32),
             enable_multipath: true,
+	    enable_fec: true,
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, true, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 103);
+        assert_eq!(raw_params.len(), 112);
 
         let new_tp = TransportParams::decode(raw_params, false).unwrap();
 
@@ -9320,12 +9665,13 @@ mod tests {
             retry_source_connection_id: None,
             max_datagram_frame_size: Some(32),
             enable_multipath: true,
+	    enable_fec: true,
         };
 
         let mut raw_params = [42; 256];
         let raw_params =
             TransportParams::encode(&tp, false, &mut raw_params).unwrap();
-        assert_eq!(raw_params.len(), 78);
+        assert_eq!(raw_params.len(), 87);
 
         let new_tp = TransportParams::decode(raw_params, true).unwrap();
 
@@ -9946,6 +10292,7 @@ mod tests {
 
     #[test]
     fn stream() {
+	//	env_logger::init();
         let mut pipe = testing::Pipe::new().unwrap();
         assert_eq!(pipe.handshake(), Ok(()));
 
@@ -17246,8 +17593,215 @@ mod tests {
 
         assert_eq!(pipe.client.is_multipath_enabled(), false);
     }
-}
 
+    #[test]
+    fn fec_stream_no_restore() {
+	logger_setup();
+	let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+	config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(100000);
+        config.set_initial_max_stream_data_bidi_local(100000);
+        config.set_initial_max_stream_data_bidi_remote(100000);
+        config.set_initial_max_streams_bidi(100);
+	config.set_initial_max_streams_uni(100);
+	config.set_fec(true);
+	
+	let mut b = [0; 15];
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+	assert_eq!(pipe.handshake(), Ok(()));
+
+	// Enable FEC on stream #4
+	assert_eq!(pipe.client.stream_fec(4, true, ReliabilityLevel::RecoveryOnly), Ok(()));
+
+	// Client sends data
+        assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
+	assert_eq!(pipe.advance(), Ok(()));
+
+	// Server gets data.
+	assert!(!pipe.server.stream_finished(4));
+        let mut r = pipe.server.readable();
+        assert_eq!(r.next(), Some(4));
+        assert_eq!(r.next(), None);
+
+	assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((5, true)));
+	assert_eq!(&b[..5], b"hello");
+        assert!(pipe.server.stream_finished(4));
+    }
+
+    #[test]
+    fn fec_stream_recovery_only() {
+	logger_setup();
+	let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+	        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(100000);
+        config.set_initial_max_stream_data_bidi_local(100000);
+        config.set_initial_max_stream_data_bidi_remote(100000);
+        config.set_initial_max_streams_bidi(100);
+	config.set_initial_max_streams_uni(100);
+	config.set_fec(true);
+	
+	let mut b = [0; 15];
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+	assert_eq!(pipe.handshake(), Ok(()));
+	
+	// Enable FEC on stream #4
+	assert_eq!(pipe.client.stream_fec(4, true, ReliabilityLevel::RecoveryOnly), Ok(()));
+	// Client sends data
+        assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
+	// But information is lost
+	testing::emit_flight(&mut pipe.client).unwrap();
+	
+	// Client sends other data
+	trace!("Sending 'world'");
+	assert_eq!(pipe.client.stream_send(4, b"world", true), Ok(5));
+	
+	// This information is received
+	// Also repair info should be sent
+	trace!("Transport over the network");
+	assert_eq!(pipe.advance(), Ok(()));
+
+	// Wait until PTO expires. Since the RTT is very low, wait a bit more.
+        let timer = pipe.client.timeout().unwrap();
+        std::thread::sleep(timer + time::Duration::from_millis(1));
+        pipe.client.on_timeout();
+
+	trace!("Transport over the network again");
+	assert_eq!(pipe.advance(), Ok(()));
+
+
+	
+	// receiver receives everything
+	assert!(!pipe.server.stream_finished(4));
+	let mut r = pipe.server.readable();
+	assert_eq!(r.next(), Some(4));
+	assert_eq!(r.next(), None);
+
+	assert_eq!(pipe.server.stream_recv(4, &mut b), Ok((10, true)));
+	assert_eq!(&b[..10], b"helloworld");
+	assert!(pipe.server.stream_finished(4));
+
+	// no retransmissions by normal recovery were used
+	assert!(pipe.client.stats().lost_bytes > 0);
+	assert_eq!(pipe.client.stats().retrans, 0);
+	assert_eq!(pipe.server.stats().lost_bytes, 0);
+	assert_eq!(pipe.server.stats().retrans, 0);
+
+	// let client_encoder_stats = pipe.client.fec.encoder.get_stats();
+	// assert_eq!(client_encoder_stats.recovered, 1);
+	// assert_eq!(client_encoder_stats.in_flight, 0);
+    }
+
+    #[test]
+    fn fec_stream_burst_loss_tolerance() {
+	logger_setup();
+	let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+	        config.set_application_protos(&[b"h3"]).unwrap();
+        config.set_initial_max_data(100000);
+        config.set_initial_max_stream_data_bidi_local(100000);
+        config.set_initial_max_stream_data_bidi_remote(100000);
+        config.set_initial_max_streams_bidi(100);
+	config.set_initial_max_streams_uni(100);
+	config.set_fec(true);
+	
+	let mut b = [0; 6000];
+
+        let mut pipe = testing::Pipe::with_config(&mut config).unwrap();
+
+	assert_eq!(pipe.handshake(), Ok(()));
+
+	let data_str = "hello".repeat(6000);
+	let data = data_str.as_bytes(); // 30kB
+	
+	// Enable FEC on stream #4
+	assert_eq!(pipe.client.stream_fec(4, true, ReliabilityLevel::BurstLossTolerance(5)), Ok(()));
+	// Client sendles data
+
+        assert_eq!(pipe.client.stream_send(4, &data[..10_000], false), Ok(10_000));
+	assert_eq!(pipe.advance(), Ok(()));
+
+	// some information is lost
+	assert_eq!(pipe.client.stream_send(4, &data[10_000..12_500], false), Ok(2500));
+	testing::emit_flight(&mut pipe.client).unwrap();
+
+	// some more information is sent
+	assert_eq!(pipe.client.stream_send(4, &data[12_500..], true), Ok(30_000 - 12_500));
+	assert_eq!(pipe.advance(), Ok(()));
+	
+	// receiver receives everything
+	assert!(!pipe.server.stream_finished(4));
+	let mut r = pipe.server.readable();
+	assert_eq!(r.next(), Some(4));
+	assert_eq!(r.next(), None);
+
+	let mut res = Vec::new();
+	let i = 0;
+	loop {
+	    match pipe.server.stream_recv(4, &mut b) {
+		Ok((count, false)) => {
+		    res.extend_from_slice(&b[i..count]);
+		    trace!("Got {count} bytes");
+		    assert_eq!(pipe.advance(), Ok(()));
+		},
+		Ok((count, true)) => {
+		    res.extend_from_slice(&b[i..count]);
+		    trace!("Got fin flag and {count} bytes");
+		    break;
+		},
+		Err(error) => {
+		    trace!("RX error {:?}", error);
+		    break;
+		}
+	    }
+	    
+	}
+	assert!(pipe.server.stream_finished(4));
+	assert_eq!(&res, data);
+
+	// no retransmissions were used
+	trace!("Client stats{:?}", pipe.client.stats());
+	trace!("Server stats{:?}", pipe.server.stats());
+	assert!(10_000 > pipe.client.stats().lost_bytes);
+	assert!(pipe.client.stats().lost_bytes > 2500);
+	assert_eq!(pipe.client.stats().retrans, 0);
+	assert_eq!(pipe.server.stats().lost_bytes, 0);
+	assert_eq!(pipe.server.stats().retrans, 0);	
+    }
+
+}
 pub use crate::packet::ConnectionId;
 pub use crate::packet::Header;
 pub use crate::packet::Type;
@@ -17262,11 +17816,13 @@ pub use crate::recovery::CongestionControlAlgorithm;
 
 pub use crate::stream::StreamIter;
 
+
 mod cid;
 mod crypto;
 mod dgram;
 #[cfg(feature = "ffi")]
 mod ffi;
+pub mod fec;
 mod flowcontrol;
 mod frame;
 pub mod h3;

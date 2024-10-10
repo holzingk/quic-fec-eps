@@ -183,7 +183,7 @@ impl RecvBuf {
             }
 
             self.len = cmp::max(self.len, buf.max_off());
-
+	    
             if !self.drain {
                 self.data.insert(buf.max_off(), buf);
             }
@@ -364,8 +364,11 @@ impl RecvBuf {
             Some(v) => v,
             None => return false,
         };
-
-        buf.off() == self.off
+	if buf.off() != self.off {
+	    trace!("Next stored byte is {}, next needed byte is {}", buf.off(), self.off);
+	    return false;
+	}
+	return true;
     }
 }
 
