@@ -37,9 +37,6 @@ pub(crate) struct HLSClass {
 
     /// How many bytes this stream has emitted in the current round.
     pub(crate) emitted: i64,
-
-    /// SA-ECF: indicates whether the stream is waiting for a faster path to become available.
-    pub waiting: u128,
 }
 
 /// Represents a class hierarchy in the context of the HLS paper.
@@ -67,7 +64,6 @@ impl HLSClass {
             stream_id: None,
             idle: false,
             emitted: 0,
-            waiting: 0,
             ticked: false,
         }
     }

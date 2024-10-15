@@ -125,7 +125,7 @@ pub struct StreamMap {
     /// Queue of stream IDs corresponding to streams that have buffered data
     /// ready to be sent to the peer. This also implies that the stream has
     /// enough flow control credits to send at least some of that data.
-    flushable: RBTree<StreamFlushablePriorityAdapter>,
+    pub(crate) flushable: RBTree<StreamFlushablePriorityAdapter>,
 
     /// Set of stream IDs corresponding to streams that have outstanding data
     /// to read. This is used to generate a `StreamIter` of streams without
@@ -399,6 +399,7 @@ impl StreamMap {
         c.remove();
     }
 
+    #[allow(dead_code)]
     pub fn peek_flushable(&self) -> Option<Arc<StreamPriorityKey>> {
         self.flushable.front().clone_pointer()
     }

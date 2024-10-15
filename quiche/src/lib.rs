@@ -570,6 +570,9 @@ pub enum Error {
 
     /// Compliance error with the multipath extensions.
     MultiPathViolation,
+
+    /// An HLS-related packet scheduling error.
+    HLSSchedulerViolation,
 }
 
 impl Error {
@@ -4361,21 +4364,57 @@ impl Connection {
             !dgram_emitted &&
             (consider_standby_paths || !path.is_standby())
         {
-            while let Some(priority_key) = self.streams.peek_flushable() {
-                let stream_id = priority_key.id;
-                let stream = match self.streams.get_mut(stream_id) {
-                    // Avoid sending frames for streams that were already stopped.
-                    //
-                    // This might happen if stream data was buffered but not yet
-                    // flushed on the wire when a STOP_SENDING frame is received.
-                    Some(v) if !v.send.is_stopped() => v,
-                    _ => {
-                        self.streams.remove_flushable(&priority_key);
-                        continue;
-                    },
-                };
+            // Get the HLS scheduler.
+            let scheduler: &mut HLSScheduler = &mut self.hls_scheduler;
 
-                let stream_off = stream.send.off_front();
+            // No pending leaves to visit. Configure the scheduler again to start a new round.
+            if scheduler.pending_leaves.front().copied().is_none() {
+                // The determination of active classes is done at the start of a round
+                // For each flushable stream, push it into a set with the stream ID of each stream.
+                let mut backlogged_streams = Vec::new();
+                let mut not_flushable = Vec::new();
+
+                for priority_key in self.streams.flushable.iter() {
+                    let stream_id = priority_key.id;
+
+                    match self.streams.get(stream_id) {
+                        // Avoid sending frames for streams that were already stopped.
+                        //
+                        // This might happen if stream data was buffered but not yet
+                        // flushed on the wire when a STOP_SENDING frame is received.
+                        Some(v) if !v.send.is_stopped() => {
+                            backlogged_streams.push(stream_id)
+                        },
+                        _ => {
+                            not_flushable.push(stream_id);
+                        },
+                    };
+                }
+
+                for stream_id in not_flushable {
+                    let priority_key = Arc::clone(
+                        &self.streams.get(stream_id).unwrap().priority_key,
+                    );
+
+                    self.streams.remove_flushable(&priority_key);
+                }
+
+                scheduler.init_round(backlogged_streams);
+            }
+
+            // Visit the class being pointed at by round-robin.
+            #[allow(clippy::never_loop)]
+            while let Some(l_id) = scheduler.pending_leaves.front().copied() {
+                let stream_id =
+                    scheduler.hierarchy.mut_class(l_id).stream_id.unwrap();
+
+                let priority_key = Arc::clone(
+                    &self.streams.get(stream_id).unwrap().priority_key,
+                );
+                let stream_off_front =
+                    self.streams.get(stream_id).unwrap().send.off_front();
+                let stream_off_back =
+                    self.streams.get(stream_id).unwrap().send.off_back();
 
                 // Encode the frame.
                 //
@@ -4393,25 +4432,95 @@ impl Connection {
                 let hdr_off = b.off();
                 let hdr_len = 1 + // frame type
                     octets::varint_len(stream_id) + // stream_id
-                    octets::varint_len(stream_off) + // offset
+                    octets::varint_len(stream_off_front) + // offset
                     2; // length, always encode as 2-byte varint
 
                 let max_len = match left.checked_sub(hdr_len) {
                     Some(v) => v,
                     None => {
-                        let priority_key = Arc::clone(&stream.priority_key);
                         self.streams.remove_flushable(&priority_key);
-
-                        continue;
+                        break;
                     },
                 };
+
+                let stream = self.streams.get_mut(stream_id).unwrap();
 
                 let (mut stream_hdr, mut stream_payload) =
                     b.split_at(hdr_off + hdr_len)?;
 
-                // Write stream data into the packet buffer.
-                let (len, fin) =
-                    stream.send.emit(&mut stream_payload.as_mut()[..max_len])?;
+                // How much data the stream currently has queued to send.
+                let stream_request = stream_off_back - stream_off_front;
+                trace!(
+                    "Round-robin: stream {} is requesting {} bytes",
+                    stream_id,
+                    stream_request
+                );
+
+                if !scheduler.hierarchy.class(l_id).ticked {
+                    scheduler.tick(l_id)
+                }
+
+                // The balance that is available to this stream.
+                let leaf_balance = scheduler.hierarchy.class(l_id).balance;
+
+                // A stream cannot emit more than the root's baseline capacity.
+                let root_id = scheduler.hierarchy.root;
+                let leaf_max_data = scheduler.hierarchy.class(root_id).weight;
+                let max_request_left =
+                    leaf_max_data - scheduler.hierarchy.class(l_id).emitted;
+
+                // How many bytes to send in this visit is bound by the remaining space in a packet
+                // for stream data and the stream's balance.
+                let stream_allocation = leaf_balance
+                    .min(max_len as i64)
+                    .min(stream_request as i64)
+                    .min(max_request_left);
+
+                // A stream continues transmitting data for as long as it has sufficient balance.
+                // Write as much stream data into the packet buffer as HLS allows.
+                let (len, fin) = stream.send.emit(
+                    &mut stream_payload.as_mut()[..stream_allocation as usize],
+                )?;
+
+                // Update the leaf's balance as per formula (8) of the HLS paper.
+                scheduler.hierarchy.mut_class(l_id).balance -= len as i64;
+                scheduler
+                    .hierarchy
+                    .mut_class(scheduler.hierarchy.root)
+                    .balance += len as i64;
+
+                scheduler.hierarchy.mut_class(l_id).emitted += len as i64;
+
+                let backlogged_stream_data = stream_request - len as u64;
+
+                // Check if the class is served.
+                if (backlogged_stream_data) == 0 {
+                    // The class is now idle. Return remaining balance to the parent (if any).
+                    scheduler.return_balance_to_parent(l_id);
+                }
+
+                let remaining_balance =
+                    scheduler.hierarchy.mut_class(l_id).balance;
+
+                let emitted = scheduler.hierarchy.mut_class(l_id).emitted;
+
+                // When the class has no available balance left or it emitted more than the capacity,
+                // advance the round-robin.
+                // "A class does not use up its full quota only if it became idle in the
+                // current round".
+                if remaining_balance <= 0 || emitted >= leaf_max_data {
+                    // Remove the stream from the round-robin queue.
+                    trace!("Visit complete for stream {stream_id} with leaf id {l_id}. Still requesting: {backlogged_stream_data}B");
+                    scheduler.pending_leaves.pop_front();
+                }
+
+                if !scheduler.hls_invariant_holds() {
+                    error!(
+                        "Invariance check failed: Q*={} for {:?},",
+                        &scheduler.q, &scheduler.hierarchy
+                    );
+                    return Err(Error::HLSSchedulerViolation);
+                }
 
                 // Encode the frame's header.
                 //
@@ -4423,7 +4532,7 @@ impl Connection {
 
                 frame::encode_stream_header(
                     stream_id,
-                    stream_off,
+                    stream_off_front,
                     len as u64,
                     fin,
                     &mut stream_hdr,
@@ -4434,7 +4543,7 @@ impl Connection {
 
                 let frame = frame::Frame::StreamHeader {
                     stream_id,
-                    offset: stream_off,
+                    offset: stream_off_front,
                     length: len,
                     fin,
                 };
@@ -4445,13 +4554,11 @@ impl Connection {
                     has_data = true;
                 }
 
-                let priority_key = Arc::clone(&stream.priority_key);
                 // If the stream is no longer flushable, remove it from the queue
                 if !stream.is_flushable() {
                     self.streams.remove_flushable(&priority_key);
                 } else if stream.incremental {
-                    // Shuffle the incremental stream to the back of the the
-                    // queue.
+                    // Shuffle the incremental stream to the back of the queue.
                     self.streams.remove_flushable(&priority_key);
                     self.streams.insert_flushable(&priority_key);
                 }
