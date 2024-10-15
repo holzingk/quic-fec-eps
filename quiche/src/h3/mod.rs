@@ -1000,12 +1000,14 @@ impl TryFrom<&[u8]> for Priority {
 		    let repair_delay_tolerance = eps_parse_repair_delay_tolerance(item.params.get("exp_alpha"))?;
 
 		    prio.push(PriorityValues::new_experimental(
-			urgency, incremental,
-			weight,
-			id, protection_ratio,
-			burst_loss_tolerance,
-			repair_delay_tolerance));
-		}
+			    urgency,
+                incremental,
+			    weight,
+			    id,
+                protection_ratio,
+			    burst_loss_tolerance,
+			    repair_delay_tolerance));
+		    }
 	    }
 	}
 	Ok(Self::new_hierarchical(prio))
@@ -4210,16 +4212,15 @@ mod tests {
         // Trailing comma in dict is malformed
         assert_eq!(Err(Error::Done), Priority::try_from(b"u=7, ".as_slice()));
 
-	// Hierarchical prio
-	assert_eq!(
-	    Ok(Priority::new_hierarchical(
-		vec!(
-		    // leaf
-		    PriorityValues::new_experimental(2, true, 600, None, 20, 0, 100),
-		    // middle layer
-		    PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))),
-	    Priority::try_from(b"u=2, exp_w=0.6, i, exp_r=0.02, exp_alpha=0.1, exp_p=(\"b\";u=3;i;exp_w=0.8)"
-			       .as_slice()));
+	    // Hierarchical prio
+        assert_eq!(
+            Ok(Priority::new_hierarchical(
+            vec!(
+                // leaf
+                PriorityValues::new_experimental(2, true, 600, None, 20, 0, 100),
+                // middle layer
+                PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))),
+                Priority::try_from(b"u=2, exp_w=0.6, i, exp_r=0.02, exp_alpha=0.1, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice()));
     }
 
     #[test]

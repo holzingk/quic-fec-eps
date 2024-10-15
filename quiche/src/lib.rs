@@ -1446,6 +1446,9 @@ pub struct Connection {
 
     /// Structure used when coping with abandoned paths in multipath.
     dcid_seq_to_abandon: VecDeque<u64>,
+
+    /// The HLS Scheduler for streams.
+    hls_scheduler: HLSScheduler,
 }
 
 /// Creates a new server-side connection.
@@ -1877,6 +1880,8 @@ impl Connection {
             newly_acked: Vec::new(),
 
             dcid_seq_to_abandon: VecDeque::new(),
+
+            hls_scheduler: HLSScheduler::new(HLSHierarchy::default()),
         };
 
         // Don't support multipath with zero-length CIDs.
@@ -17259,6 +17264,8 @@ pub use crate::path::PathStatus;
 pub use crate::path::SocketAddrIter;
 
 pub use crate::recovery::CongestionControlAlgorithm;
+pub use crate::hls_scheduler::HLSScheduler;
+pub use crate::hls_scheduler::HLSHierarchy;
 
 pub use crate::stream::StreamIter;
 
@@ -17270,6 +17277,8 @@ mod ffi;
 mod flowcontrol;
 mod frame;
 pub mod h3;
+/// Module for the HLS stream scheduler.
+pub mod hls_scheduler;
 mod minmax;
 mod packet;
 mod path;
@@ -17278,4 +17287,3 @@ mod ranges;
 mod recovery;
 mod stream;
 mod tls;
-mod hls;
