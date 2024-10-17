@@ -861,10 +861,13 @@ impl PriorityValues {
     }
 
     /// Creates a new Priority with experimental parameters
-    pub fn new_experimental(urgency: u8, incremental: bool, weight: u32,
-			    id: Option<String>,
-			    protection_ratio: u32, burst_loss_tolerance: u32,
-			    repair_delay_tolerance: u32) -> Self {
+    pub fn new_experimental(urgency: u8,
+                            incremental: bool,
+                            weight: u32,
+                            id: Option<String>,
+			                protection_ratio: u32,
+                            burst_loss_tolerance: u32,
+			                repair_delay_tolerance: u32) -> Self {
 	Self {
 	    urgency,
 	    incremental,
@@ -873,9 +876,8 @@ impl PriorityValues {
 	    protection_ratio,
 	    burst_loss_tolerance,
 	    repair_delay_tolerance,
-	}
+	    }
     }
-
 }
 
 impl Priority {
@@ -883,7 +885,6 @@ impl Priority {
     pub fn new_hierarchical(values: Vec<PriorityValues>) -> Self {
 	Self(values)
     }
-
 
     /// Creates a new priority, legacy constructor
     pub fn new(urgency: u8, incremental: bool) -> Self {
@@ -4219,8 +4220,35 @@ mod tests {
                 // leaf
                 PriorityValues::new_experimental(2, true, 600, None, 20, 0, 100),
                 // middle layer
-                PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))),
-                Priority::try_from(b"u=2, exp_w=0.6, i, exp_r=0.02, exp_alpha=0.1, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice()));
+                PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))
+            ),
+            Priority::try_from(b"u=2, exp_w=0.6, i, exp_r=0.02, exp_alpha=0.1, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice()));
+    }
+
+    #[test]
+    #[ignore = "Not yet implemented"]
+    #[cfg(feature = "sfv")]
+    fn hierarchical_prio_to_hls_tree() {
+
+        // Define stream priorities
+        let a1= Priority::try_from(b"u=1, exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
+        let a2 = Priority::try_from(b"u=2, exp_p=(\"a\")".as_slice());
+
+        let b1 = Priority::try_from(b"u=2, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
+        let b2 = Priority::try_from(b"u=2, exp_p=(\"b\")".as_slice());
+
+        let c = Priority::try_from(b"u=1".as_slice());
+
+        let priority_values = match a2 {
+            Ok(Priority(pv)) => pv,
+            _ => unreachable!(),
+        };
+
+        for p in priority_values.iter() {
+            println!("{:?}", p);
+        }
+
+        assert_eq!(5, 5);
     }
 
     #[test]
