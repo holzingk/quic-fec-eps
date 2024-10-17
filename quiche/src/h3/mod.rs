@@ -813,7 +813,7 @@ fn eps_parse_repair_delay_tolerance(bitem: Option<&sfv::BareItem>) -> std::resul
 /// trait requires the `sfv` feature to be enabled.
 #[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
-pub struct Priority(Vec<PriorityValues>);
+pub struct Priority(pub Vec<PriorityValues>);
 
 /// The priority attributes of a node in the tree of priority classes
 #[derive(Debug, PartialEq, Eq)]
@@ -3286,6 +3286,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use crate::hls_scheduler::eps_to_hls;
     use super::*;
 
     use super::testing::*;
@@ -4228,27 +4229,22 @@ mod tests {
     #[test]
     #[ignore = "Not yet implemented"]
     #[cfg(feature = "sfv")]
-    fn hierarchical_prio_to_hls_tree() {
+    fn hierarchical_prios_to_hls_tree() {
 
         // Define stream priorities
         let a1= Priority::try_from(b"u=1, exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
-        let a2 = Priority::try_from(b"u=2, exp_p=(\"a\")".as_slice());
+        let a2 = Priority::try_from(b"u=2, exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
 
         let b1 = Priority::try_from(b"u=2, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
-        let b2 = Priority::try_from(b"u=2, exp_p=(\"b\")".as_slice());
+        let b2 = Priority::try_from(b"u=2, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
 
         let c = Priority::try_from(b"u=1".as_slice());
 
-        let priority_values = match a2 {
-            Ok(Priority(pv)) => pv,
-            _ => unreachable!(),
-        };
+        let priority_values_vector: Vec<Result<Priority>> = vec![a1, a2, b1, b2, c];
 
-        for p in priority_values.iter() {
-            println!("{:?}", p);
-        }
+        eps_to_hls(priority_values_vector);
 
-        assert_eq!(5, 5);
+        assert_eq!(0, 0);
     }
 
     #[test]

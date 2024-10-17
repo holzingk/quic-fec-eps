@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fmt::Formatter;
+use crate::h3::{Priority, PriorityValues};
+
 /// Implementation of the Hierarchical Link Sharing (HLS) Scheduling algorithm.
 #[derive(Clone, Debug)]
 pub(crate) struct HLSClass {
@@ -297,6 +299,19 @@ pub struct HLSScheduler {
 
     /// Class IDs (not stream IDs!) that have yet to be visited by the round-robin round.
     pub(crate) pending_leaves: VecDeque<u64>,
+}
+
+pub fn eps_to_hls(leaves: Vec<crate::h3::Result<Priority>>) -> HLSHierarchy {
+    for leaf in leaves {
+        let priority_values = match leaf {
+            Ok(Priority(pv)) => pv,
+            _ => unreachable!(),
+        };
+
+        println!("{:?}", priority_values);
+    }
+
+    HLSHierarchy::new()
 }
 
 impl HLSScheduler {
