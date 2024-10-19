@@ -387,25 +387,9 @@ pub fn eps_to_hls(leaves: Vec<crate::h3::Result<Priority>>) -> HLSHierarchy {
             Ok(Priority(pv)) => pv,
             _ => unreachable!(),
         };
+
+        // Convert the EPS hierarchy to HLS here.
     }
-
-    // Convert the EPS hierarchy to HLS here.
-    let root_id = hierarchy.insert(1, None);
-
-    // Sample hierarchy spec, cf. output with page 26 of the HLS MA thesis
-    // let x = hierarchy.insert(5, Some(root_id));
-    // let _x1 = hierarchy.insert(3, Some(x));
-    // let _x2 = hierarchy.insert(4, Some(x));
-    //
-    // let _y = hierarchy.insert(3, Some(root_id));
-    //
-    // let z = hierarchy.insert(2, Some(root_id));
-    // let _z1 = hierarchy.insert(1, Some(z));
-
-    // Convert relative weights into global ones.
-    hierarchy.generate_guarantees(capacity);
-
-    // println!("{:?}", hierarchy);
 
     hierarchy
 }
@@ -429,7 +413,7 @@ impl HLSScheduler {
     pub(crate) fn tick(&mut self, class_id: u64) {
         let parent_id = self.hierarchy.class(class_id).parent.unwrap();
         let parent_fair_quota = self.request_fair_quota(parent_id);
-        let leaf_weight = self.hierarchy.class(class_id).weight;
+        let leaf_weight = self.hierarchy.class(class_id).guarantee;
 
         let leaf_quota = leaf_weight * parent_fair_quota;
 
@@ -466,7 +450,7 @@ impl HLSScheduler {
             let parent_fair_quota = self.request_fair_quota(pid);
 
             //  Update balance and residual as per formula (6).
-            let class_weight = self.hierarchy.class(class_id).weight;
+            let class_weight = self.hierarchy.class(class_id).guarantee;
             let class_quota = class_weight * parent_fair_quota;
 
             {
@@ -495,9 +479,9 @@ impl HLSScheduler {
             active_leaves.union(&active_internal).cloned().collect();
         let ks = children.intersection(&active_leaves_or_internal_set);
 
-        // Sum of the weights of each class k in ks
+        // Sum of the guarantee of each class k in ks
         let sum_weights =
-            ks.map(|k| self.hierarchy.class(*k).weight).sum::<i64>();
+            ks.map(|k| self.hierarchy.class(*k).guarantee).sum::<i64>();
 
         let node = self.hierarchy.mut_class(class_id);
 
@@ -521,18 +505,18 @@ impl HLSScheduler {
         // Sum of the weights of the leaf classes
         let sum_leaf_weights = leaf_classes
             .iter()
-            .map(|id| self.hierarchy.class(*id).weight)
+            .map(|id| self.hierarchy.class(*id).guarantee)
             .sum::<i64>();
 
         // Sum of the weights of the internal classes
         let sum_internal_weights = internal_classes
             .iter()
-            .map(|id| self.hierarchy.class(*id).weight)
+            .map(|id| self.hierarchy.class(*id).guarantee)
             .sum::<i64>();
 
         let sum_active_leaf_weights = active_leaves
             .iter()
-            .map(|id| self.hierarchy.class(*id).weight)
+            .map(|id| self.hierarchy.class(*id).guarantee)
             .sum::<i64>();
 
         let constant = sum_internal_weights + sum_leaf_weights;
@@ -584,7 +568,7 @@ impl HLSScheduler {
         for leaf in leaf_classes.clone() {
             let stream_id = self.hierarchy.class(leaf).stream_id.unwrap();
             let became_idle = self.hierarchy.class(leaf).idle;
-            let leaf_weight = self.hierarchy.class(leaf).weight;
+            let leaf_weight = self.hierarchy.class(leaf).guarantee;
 
             // Mark leaves as not being yet ticked.
             self.hierarchy.mut_class(leaf).ticked = false;
@@ -761,8 +745,8 @@ impl HLSScheduler {
 
         let ks = children.intersection(&union);
 
-        // Sum up the weight of each child k in ks.
-        ks.map(|k| self.hierarchy.class(*k).weight).sum::<i64>()
+        // Sum up the guarantee (= the global weight) of each child k in ks.
+        ks.map(|k| self.hierarchy.class(*k).guarantee).sum::<i64>()
     }
 
     pub(crate) fn return_balance_to_parent(&mut self, class_id: u64) {

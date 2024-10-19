@@ -3287,6 +3287,7 @@ pub mod testing {
 #[cfg(test)]
 mod tests {
     use crate::hls_scheduler::eps_to_hls;
+    use crate::HLSHierarchy;
     use super::*;
 
     use super::testing::*;
@@ -4224,6 +4225,36 @@ mod tests {
                 PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))
             ),
             Priority::try_from(b"u=2, exp_w=0.6, i, exp_r=0.02, exp_alpha=0.1, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice()));
+    }
+
+    // Sample hierarchy specification, cf. page 9 and 26 of the HLS MA thesis
+    #[test]
+    pub fn relative_hls_weight_to_global_guarantee() {
+        let capacity = 10_000;
+        let mut hierarchy = HLSHierarchy::new();
+
+        let root_id = hierarchy.insert(1, None);
+
+        let x = hierarchy.insert(5, Some(root_id));
+        let x1 = hierarchy.insert(3, Some(x));
+        let x2 = hierarchy.insert(4, Some(x));
+
+        let y = hierarchy.insert(3, Some(root_id));
+
+        let z = hierarchy.insert(2, Some(root_id));
+        let z1 = hierarchy.insert(1, Some(z));
+
+        // Convert relative weights into global ones.
+        hierarchy.generate_guarantees(capacity);
+
+        assert_eq!(hierarchy.class(root_id).guarantee, capacity as i64);
+        assert_eq!(hierarchy.class(x).guarantee, 5000);
+        assert_eq!(hierarchy.class(y).guarantee, 3000);
+        assert_eq!(hierarchy.class(z).guarantee, 2000);
+
+        assert_eq!(hierarchy.class(x1).guarantee, 2142);
+        assert_eq!(hierarchy.class(x2).guarantee, 2857);
+        assert_eq!(hierarchy.class(z1).guarantee, 2000);
     }
 
     #[test]
