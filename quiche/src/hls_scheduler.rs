@@ -39,6 +39,9 @@ pub(crate) struct HLSClass {
 
     /// How many bytes this stream has emitted in the current round.
     pub(crate) emitted: i64,
+
+    /// A guarantee in bytes per round, derived from relative weights and the root's capacity.
+    pub guarantee: f64,
 }
 
 /// Represents a class hierarchy in the context of the HLS paper.
@@ -51,6 +54,50 @@ pub struct HLSHierarchy {
 
     /// Next class identifier to be assigned.
     next_id: u64,
+}
+
+impl HLSHierarchy {
+    fn guarantee_from_weight(&mut self, node_id: u64, capacity: u64) {
+        let root = self.root;
+
+        let mut ancestors_or_self = self.ancestors(node_id);
+        ancestors_or_self.insert(node_id);
+
+        let mut product: Vec<f64> = vec![];
+
+        for j in ancestors_or_self {
+            if j != root {
+                let node_weight = self.class(j).weight as f64;
+                let node_siblings = self.siblings(j);
+
+                // Sum up the weights of the siblings
+                let sum_siblings_weights = node_siblings
+                    .iter()
+                    .map(|k| self.class(*k).weight)
+                    .sum::<i64>()
+                    as f64;
+
+                match sum_siblings_weights {
+                    x if x <= 0.0 => product.push(0.0),
+                    _ => product.push(node_weight / sum_siblings_weights),
+                }
+            }
+        }
+
+        let guarantee = (capacity as f64) * product.iter().fold(1.0, |acc, x| acc * x);
+
+        if let Some(n) = self.classes.get_mut(&node_id) {
+            n.guarantee = guarantee;
+        }
+    }
+
+    pub(crate) fn generate_guarantees(&mut self, capacity: u64) {
+        let node_ids: Vec<u64> = self.classes.keys().copied().collect();
+
+        for node_id in node_ids {
+            self.guarantee_from_weight(node_id, capacity);
+        }
+    }
 }
 
 impl HLSClass {
@@ -67,6 +114,7 @@ impl HLSClass {
             idle: false,
             emitted: 0,
             ticked: false,
+            guarantee: 0.0,
         }
     }
 }
@@ -169,6 +217,34 @@ impl HLSHierarchy {
         ancestors
     }
 
+    pub(crate) fn parent(&self, node_id: u64) -> Option<u64> {
+        if let Some(node) = self.classes.get(&node_id) {
+            node.parent
+        } else {
+            None
+        }
+    }
+
+
+    pub(crate) fn siblings(&self, node_id: u64) -> HashSet<u64> {
+        // Return empty vector if the node does not exist
+        if !self.classes.contains_key(&node_id) {
+            return HashSet::new();
+        }
+
+        if let Some(parent_id) = self.parent(node_id) {
+            if let Some(parent) = self.classes.get(&parent_id) {
+                return parent.children.clone();
+            }
+        }
+
+        // The node is a sibling of itself
+        let mut reflexive = HashSet::new();
+        reflexive.insert(node_id);
+
+        reflexive
+    }
+
     pub(crate) fn internal_nodes(&self, node_id: u64) -> HashSet<u64> {
         let mut internal_nodes: HashSet<u64> = HashSet::new();
         let mut queue: HashSet<u64> =
@@ -221,7 +297,7 @@ impl fmt::Debug for HLSHierarchy {
 
             writeln!(
                 f,
-                "{}{}: balance: {}, weight: {}, {}residual: {}",
+                "{}{}: balance: {}, weight: {}, {}residual: {}, guarantee: {}",
                 current_prefix,
                 match class.stream_id {
                     Some(stream_id) => format!("stream {}", stream_id),
@@ -237,6 +313,7 @@ impl fmt::Debug for HLSHierarchy {
                     "".to_string()
                 },
                 class.residual,
+                class.guarantee,
             )?;
 
             let child_prefix = if depth == 0 {
@@ -302,6 +379,9 @@ pub struct HLSScheduler {
 }
 
 pub fn eps_to_hls(leaves: Vec<crate::h3::Result<Priority>>) -> HLSHierarchy {
+    let capacity = 10_000;
+    let mut hierarchy = HLSHierarchy::new();
+
     for leaf in leaves {
         let priority_values = match leaf {
             Ok(Priority(pv)) => pv,
@@ -311,7 +391,25 @@ pub fn eps_to_hls(leaves: Vec<crate::h3::Result<Priority>>) -> HLSHierarchy {
         println!("{:?}", priority_values);
     }
 
-    HLSHierarchy::new()
+    // Convert the EPS hierarchy to HLS here.
+    let root_id = hierarchy.insert(1, None);
+
+    // Sample hierarchy spec, cf. output with page 26 of the HLS MA thesis
+    // let x = hierarchy.insert(5, Some(root_id));
+    // let _x1 = hierarchy.insert(3, Some(x));
+    // let _x2 = hierarchy.insert(4, Some(x));
+    //
+    // let _y = hierarchy.insert(3, Some(root_id));
+    //
+    // let z = hierarchy.insert(2, Some(root_id));
+    // let _z1 = hierarchy.insert(1, Some(z));
+
+    // Convert relative weights into global ones.
+    hierarchy.generate_guarantees(capacity);
+
+    // println!("{:?}", hierarchy);
+
+    hierarchy
 }
 
 impl HLSScheduler {

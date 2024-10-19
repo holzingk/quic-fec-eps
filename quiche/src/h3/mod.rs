@@ -4227,7 +4227,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Not yet implemented"]
     #[cfg(feature = "sfv")]
     fn hierarchical_prios_to_hls_tree() {
 
