@@ -41,7 +41,7 @@ pub(crate) struct HLSClass {
     pub(crate) emitted: i64,
 
     /// A guarantee in bytes per round, derived from relative weights and the root's capacity.
-    pub guarantee: f64,
+    pub guarantee: i64,
 }
 
 /// Represents a class hierarchy in the context of the HLS paper.
@@ -87,7 +87,7 @@ impl HLSHierarchy {
         let guarantee = (capacity as f64) * product.iter().fold(1.0, |acc, x| acc * x);
 
         if let Some(n) = self.classes.get_mut(&node_id) {
-            n.guarantee = guarantee;
+            n.guarantee = guarantee as i64;
         }
     }
 
@@ -114,7 +114,7 @@ impl HLSClass {
             idle: false,
             emitted: 0,
             ticked: false,
-            guarantee: 0.0,
+            guarantee: 0,
         }
     }
 }
@@ -387,8 +387,6 @@ pub fn eps_to_hls(leaves: Vec<crate::h3::Result<Priority>>) -> HLSHierarchy {
             Ok(Priority(pv)) => pv,
             _ => unreachable!(),
         };
-
-        println!("{:?}", priority_values);
     }
 
     // Convert the EPS hierarchy to HLS here.
