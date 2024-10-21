@@ -61,6 +61,9 @@ pub struct HLSHierarchy {
     /// Map of class identifiers to class objects.
     pub(crate) classes: HashMap<u64, HLSClass>,
 
+    /// Associates an EPS id with a class ID used by the HLS scheduler.
+    pub(crate) eps_id_to_hls_id: HashMap<String, u64>,
+
     /// Identifier of the root class.
     pub(crate) root: u64,
 
@@ -150,6 +153,7 @@ impl HLSHierarchy {
         let root = 0;
         HLSHierarchy {
             classes: HashMap::new(),
+            eps_id_to_hls_id: HashMap::new(),
             root,
             next_id: root,
         }
@@ -410,46 +414,52 @@ pub struct HLSScheduler {
     pub(crate) pending_leaves: VecDeque<u64>,
 }
 
+/// Converts an EPS-specified hierarchy to a hierarchy the HLS scheduler can use
 pub fn eps_to_hls(leaves: Vec<crate::h3::Result<Priority>>) -> HLSHierarchy {
-    // Create an empty hiearchy consisting of the root node
+    // Create an empty hiearchy consisting of the root node only
     let mut hierarchy = HLSHierarchy::new();
-
-    let root_id = hierarchy.insert(0, false, 1, 0, 0, 0, None);
-
+    let root_id = hierarchy.insert(0,
+                                   false,
+                                   1,
+                                   0,
+                                   0,
+                                   0,
+                                   None);
 
     for leaf in leaves {
-        let priority_values = match leaf {
+        let mut priority_values = match leaf {
             Ok(Priority(pv)) => pv,
-            _ => break,
+            _ => continue,
         };
 
-        // Direct child of the root
-        if priority_values.len() == 1 {
-            let pv = priority_values.first().unwrap();
-            println!("{:?}", pv);
+        // Reverse vector to append nodes top-down
+        priority_values.reverse();
 
-            // pv.id;
+        // The first and default parent is the root; start with it.
+        let mut current_parent = root_id;
+        for pvs in priority_values {
 
-            hierarchy.insert(
-                pv.urgency,
-                pv.incremental,
-                pv.weight,
-                pv.burst_loss_tolerance,
-                pv.protection_ratio,
-                pv.repair_delay_tolerance,
-                Some(root_id));
+            if let Some(id) = pvs.id.clone() {
+                if hierarchy.eps_id_to_hls_id.contains_key(&id) {
+                    // Node has already been added. Use it as the parent in the next iteration.
+                    current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
+                    continue
+                }
+            }
+
+            current_parent = hierarchy.insert(
+                pvs.urgency,
+                pvs.incremental,
+                pvs.weight,
+                pvs.burst_loss_tolerance,
+                pvs.protection_ratio,
+                pvs.repair_delay_tolerance,
+                Some(current_parent));
+
+            if let Some(id) = pvs.id {
+                hierarchy.eps_id_to_hls_id.insert(id, current_parent);
+            }
         }
-
-        // Convert the EPS hierarchy to HLS here by iterating over the leaves and its parents
-        let mut cur_parent: Option<u64> = None;
-
-        // for pvs in priority_values.windows(2) {
-        //     println!("{:?}", pvs);
-        //     println!("----");
-        //
-        //     let child = pvs.first().unwrap();
-        //     let parent = pvs.last().unwrap();
-        // }
     }
 
     // Convert the relative weights of the hierarchy into global weights.
@@ -458,7 +468,7 @@ pub fn eps_to_hls(leaves: Vec<crate::h3::Result<Priority>>) -> HLSHierarchy {
     let capacity = 10_000;
     hierarchy.generate_guarantees(capacity);
 
-    println!("{:?}", hierarchy);
+    // println!("{:?}", hierarchy);
 
     hierarchy
 }
