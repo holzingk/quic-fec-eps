@@ -819,15 +819,15 @@ pub struct Priority(pub Vec<PriorityValues>);
 #[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct PriorityValues {
-    urgency: u8,
-    incremental: bool,
-    weight: u32,
-    id: Option<String>,
+    pub urgency: u8,
+    pub incremental: bool,
+    pub weight: u32,
+    pub id: Option<String>,
     // in promille, cannot implement Eq for float types
-    protection_ratio: u32,
-    burst_loss_tolerance: u32,
+    pub protection_ratio: u32,
+    pub burst_loss_tolerance: u32,
     // in promille, cannot implement Eq for float types
-    repair_delay_tolerance: u32,
+    pub repair_delay_tolerance: u32,
 }
 
 
@@ -4233,16 +4233,17 @@ mod tests {
         let capacity = 10_000;
         let mut hierarchy = HLSHierarchy::new();
 
-        let root_id = hierarchy.insert(1, None);
+        let root_id = hierarchy.insert(1, false, 1, 0, 0, 0, None);
 
-        let x = hierarchy.insert(5, Some(root_id));
-        let x1 = hierarchy.insert(3, Some(x));
-        let x2 = hierarchy.insert(4, Some(x));
+        let x = hierarchy.insert(3, false, 5, 0, 0, 0, Some(root_id));
 
-        let y = hierarchy.insert(3, Some(root_id));
+        let x1 = hierarchy.insert(3, false, 3, 0, 0, 0, Some(x));
+        let x2 = hierarchy.insert(3, false, 4, 0, 0, 0, Some(x));
 
-        let z = hierarchy.insert(2, Some(root_id));
-        let z1 = hierarchy.insert(1, Some(z));
+        let y = hierarchy.insert(3, false, 3, 0, 0, 0, Some(root_id));
+
+        let z = hierarchy.insert(3, false, 2, 0, 0, 0, Some(root_id));
+        let z1 = hierarchy.insert(3, false, 2, 0, 0, 0, Some(z));
 
         // Convert relative weights into global ones.
         hierarchy.generate_guarantees(capacity);
@@ -4262,11 +4263,11 @@ mod tests {
     fn hierarchical_prios_to_hls_tree() {
 
         // Define stream priorities
-        let a1= Priority::try_from(b"u=1, exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
-        let a2 = Priority::try_from(b"u=2, exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
+        let a1= Priority::try_from(b"u=1,exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
+        let a2 = Priority::try_from(b"u=2,exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
 
-        let b1 = Priority::try_from(b"u=2, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
-        let b2 = Priority::try_from(b"u=2, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
+        let b1 = Priority::try_from(b"u=2,exp_w=0.6,exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
+        let b2 = Priority::try_from(b"u=2,exp_w=0.6,exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
 
         let c = Priority::try_from(b"u=1".as_slice());
 

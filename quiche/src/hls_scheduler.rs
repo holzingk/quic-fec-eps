@@ -16,7 +16,7 @@ pub(crate) struct HLSClass {
     children: HashSet<u64>,
 
     /// The class' weight.
-    pub(crate) weight: i64,
+    pub(crate) weight: u32,
 
     /// Number of bytes the class is allowed to transmit.
     pub(crate) balance: i64,
@@ -42,6 +42,18 @@ pub(crate) struct HLSClass {
 
     /// A guarantee in bytes per round, derived from relative weights and the root's capacity.
     pub guarantee: i64,
+
+    /// The urgency of the class
+    pub urgency: u8,
+
+    /// Whether the class is marked as incremental.
+    pub incremental: bool,
+
+    pub burst_loss_tolerance: u32,
+
+    pub protection_ratio: u32,
+
+    pub repair_delay_tolerance: u32,
 }
 
 /// Represents a class hierarchy in the context of the HLS paper.
@@ -74,7 +86,7 @@ impl HLSHierarchy {
                 let sum_siblings_weights = node_siblings
                     .iter()
                     .map(|k| self.class(*k).weight)
-                    .sum::<i64>()
+                    .sum::<u32>()
                     as f64;
 
                 match sum_siblings_weights {
@@ -101,7 +113,15 @@ impl HLSHierarchy {
 }
 
 impl HLSClass {
-    pub fn new(id: u64, parent: Option<u64>, weight: i64) -> HLSClass {
+    pub fn new(id: u64,
+               parent: Option<u64>,
+               urgency: u8,
+               incremental: bool,
+               weight: u32,
+               burst_loss_tolerance: u32,
+               protection_ratio: u32,
+               repair_delay_tolerance: u32
+    ) -> HLSClass {
         HLSClass {
             id,
             parent,
@@ -115,6 +135,11 @@ impl HLSClass {
             emitted: 0,
             ticked: false,
             guarantee: 0,
+            urgency,
+            incremental,
+            burst_loss_tolerance,
+            protection_ratio,
+            repair_delay_tolerance,
         }
     }
 }
@@ -158,10 +183,17 @@ impl HLSHierarchy {
     }
 
     /// Inserts a new class into the hierarchy.
-    pub fn insert(&mut self, weight: i64, parent: Option<u64>) -> u64 {
+    pub fn insert(&mut self,
+                  urgency: u8,
+                  incremental: bool,
+                  weight: u32,
+                  burst_loss_tolerance: u32,
+                  protection_ratio: u32,
+                  repair_delay_tolerance: u32,
+                  parent: Option<u64>) -> u64 {
+
         let id = self.next_id();
-        let guarantee = weight;
-        let class = HLSClass::new(id, parent, guarantee);
+        let class = HLSClass::new(id, parent, urgency, incremental, weight, burst_loss_tolerance, protection_ratio, repair_delay_tolerance);
 
         // If the class has a parent, update the parent's children
         if let Some(pid) = parent {
@@ -270,11 +302,11 @@ impl Default for HLSHierarchy {
     fn default() -> Self {
         let mut hierarchy = HLSHierarchy::new();
         let max_streams: u64 = 50;
-        let root = hierarchy.insert((max_streams * 1_000) as i64, None);
+        let root = hierarchy.insert(3, false, 1, 0, 0, 0, None);
 
         // This default range is due to Quiche's tests using stream ids between 0-50.
         for sid in 0..max_streams {
-            let class = hierarchy.insert(1_000, Some(root));
+            let class = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
             hierarchy.set_stream_id(class, sid);
         }
 
@@ -379,17 +411,54 @@ pub struct HLSScheduler {
 }
 
 pub fn eps_to_hls(leaves: Vec<crate::h3::Result<Priority>>) -> HLSHierarchy {
-    let capacity = 10_000;
+    // Create an empty hiearchy consisting of the root node
     let mut hierarchy = HLSHierarchy::new();
+
+    let root_id = hierarchy.insert(0, false, 1, 0, 0, 0, None);
+
 
     for leaf in leaves {
         let priority_values = match leaf {
             Ok(Priority(pv)) => pv,
-            _ => unreachable!(),
+            _ => break,
         };
 
-        // Convert the EPS hierarchy to HLS here.
+        // Direct child of the root
+        if priority_values.len() == 1 {
+            let pv = priority_values.first().unwrap();
+            println!("{:?}", pv);
+
+            // pv.id;
+
+            hierarchy.insert(
+                pv.urgency,
+                pv.incremental,
+                pv.weight,
+                pv.burst_loss_tolerance,
+                pv.protection_ratio,
+                pv.repair_delay_tolerance,
+                Some(root_id));
+        }
+
+        // Convert the EPS hierarchy to HLS here by iterating over the leaves and its parents
+        let mut cur_parent: Option<u64> = None;
+
+        // for pvs in priority_values.windows(2) {
+        //     println!("{:?}", pvs);
+        //     println!("----");
+        //
+        //     let child = pvs.first().unwrap();
+        //     let parent = pvs.last().unwrap();
+        // }
     }
+
+    // Convert the relative weights of the hierarchy into global weights.
+    // Global weights are global guarantees of bytes per round that each class receives, i.e.,
+    // the MINIMUM allocation in the worst case.
+    let capacity = 10_000;
+    hierarchy.generate_guarantees(capacity);
+
+    println!("{:?}", hierarchy);
 
     hierarchy
 }
