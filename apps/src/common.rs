@@ -51,6 +51,10 @@ use quiche::ConnectionId;
 use quiche::h3::NameValue;
 use quiche::h3::Priority;
 
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::str::FromStr;
+use std::convert::TryInto;
+
 pub fn stdout_sink(out: String) {
     print!("{out}");
 }
@@ -134,6 +138,49 @@ fn make_resource_writer(
 
     None
 }
+
+/// Creates a vector wich contains a series of the current timestamp in u128 values.
+/// Length is round up to the next number divisable by 128
+fn make_body_with_timestamp(len: usize) -> Vec<u8> {
+    let vec_capacity = len.next_multiple_of(u128::BITS as usize);
+    let mut ret: Vec<u8> = Vec::with_capacity(vec_capacity);
+
+    let num_ts = vec_capacity / 128;
+    
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)
+        .expect("we are past unix epoch")
+        .as_micros();
+    let now_bytes = now.to_be_bytes();
+    for _ in 0..num_ts {
+	ret.extend_from_slice(&now_bytes);
+    }
+    ret
+    
+}
+
+fn timestamp_slice_to_diff(t_start: SystemTime, t_first_byte: SystemTime, buf: &[u8]) -> Vec<u8> {
+    let mut res: Vec<u8> = Vec::with_capacity(16 * 2 + buf.len() / 16);
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)
+        .expect("we are past unix epoch")
+        .as_micros();
+    // should be divisable by 128
+    assert_eq!(buf.len().wrapping_rem_euclid(u128::BITS as usize), 0);
+    res.extend_from_slice(&t_start.duration_since(UNIX_EPOCH)
+			  .expect("no time travel")
+			  .as_micros()
+			  .to_be_bytes());
+    res.extend_from_slice(&t_first_byte.duration_since(UNIX_EPOCH)
+			  .expect("not sideways in time")
+			  .as_micros()
+			  .to_be_bytes());
+    for chunk in buf.chunks(16) {
+	let sent_ts = u128::from_be_bytes(chunk.try_into().unwrap());
+	let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
+	let flight_time_bytes = flight_time.to_be_bytes();
+	res.extend_from_slice(&flight_time_bytes)
+    }
+    res
+} 
 
 fn autoindex(path: path::PathBuf, index: &str) -> path::PathBuf {
     if let Some(path_str) = path.to_str() {
@@ -265,6 +312,16 @@ pub fn generate_cid_and_reset_token<T: SecureRandom>(
     (scid, reset_token)
 }
 
+/// Returns the length of the desired body (experimental use only)
+pub fn length_from_query_string(url: &url::Url) -> Option<usize> {
+    for param in url.query_pairs() {
+	if param.0 == "length" {
+	    return usize::from_str(&param.1).ok()
+	}
+    }
+    None
+}
+
 /// Construct a priority field value from quiche apps custom query string.
 pub fn priority_field_value_from_query_string(url: &url::Url) -> Option<String> {
     let mut priority = "".to_string();
@@ -382,6 +439,8 @@ struct Http3Request {
     response_body: Vec<u8>,
     response_body_max: usize,
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
+    t_sent: Option<SystemTime>,
+    t_first_byte: Option<SystemTime>,
 }
 
 type Http3ResponseBuilderResult = std::result::Result<
@@ -832,6 +891,8 @@ impl Http3Conn {
                     response_body_max: dump_json.unwrap_or_default(),
                     stream_id: None,
                     response_writer: None,
+		    t_sent: None,
+		    t_first_byte: None,
                 });
             }
         }
@@ -893,9 +954,9 @@ impl Http3Conn {
 
     /// Builds an HTTP/3 response given a request.
     fn build_h3_response(
-        root: &str, index: &str, request: &[quiche::h3::Header],
+        _root: &str, _index: &str, request: &[quiche::h3::Header],
     ) -> Http3ResponseBuilderResult {
-        let mut file_path = path::PathBuf::from(root);
+        // let mut file_path = path::PathBuf::from(root);
         let mut scheme = None;
         let mut authority = None;
         let mut host = None;
@@ -1074,12 +1135,16 @@ impl Http3Conn {
         let url = format!("{decided_scheme}://{decided_host}{decided_path}");
         let url = url::Url::parse(&url).unwrap();
 
-        let pathbuf = path::PathBuf::from(url.path());
-        let pathbuf = autoindex(pathbuf, index);
+        // let pathbuf = path::PathBuf::from(url.path());
+        // let pathbuf = autoindex(pathbuf, index);
 
         // Priority query string takes precedence over the header.
         // So replace the header with one built here.
         let query_priority = priority_field_value_from_query_string(&url);
+
+	// Experimental use only:
+	// Desired length of the reply:
+	let desired_length = length_from_query_string(&url).expect("Length parameter must be replied");
 
         if let Some(p) = query_priority {
             priority = p.as_bytes().to_vec();
@@ -1087,17 +1152,18 @@ impl Http3Conn {
 
         let (status, body) = match decided_method {
             "GET" => {
-                for c in pathbuf.components() {
-                    if let path::Component::Normal(v) = c {
-                        file_path.push(v)
-                    }
-                }
+		(200, make_body_with_timestamp(desired_length))
+                // for c in pathbuf.components() {
+                //     if let path::Component::Normal(v) = c {
+                //         file_path.push(v)
+                //     }
+                // }
 
-                match std::fs::read(file_path.as_path()) {
-                    Ok(data) => (200, data),
+                // match std::fs::read(file_path.as_path()) {
+                //     Ok(data) => (200, data),
 
-                    Err(_) => (404, b"Not Found!".to_vec()),
-                }
+                //     Err(_) => (404, b"Not Found!".to_vec()),
+                // }
             },
 
             _ => (405, Vec::new()),
@@ -1148,7 +1214,7 @@ impl HttpConn for Http3Conn {
                     break;
                 },
             };
-
+	    req.t_sent = Some(SystemTime::now());
             debug!("Sent HTTP request {:?}", &req.hdrs);
 
             if let Some(priority) = &req.priority {
@@ -1238,6 +1304,7 @@ impl HttpConn for Http3Conn {
                         .unwrap();
 
                     req.response_hdrs = list;
+		    req.t_first_byte = Some(SystemTime::now());
                 },
 
                 Ok((stream_id, quiche::h3::Event::Data)) => {
@@ -1262,8 +1329,8 @@ impl HttpConn for Http3Conn {
                         req.response_body.extend_from_slice(&buf[..len]);
 
                         match &mut req.response_writer {
-                            Some(rw) => {
-                                rw.write_all(&buf[..read]).ok();
+                            Some(_rw) => {
+                                //rw.write_all(&buf[..read]).ok();
                             },
 
                             None =>
@@ -1278,7 +1345,7 @@ impl HttpConn for Http3Conn {
                     }
                 },
 
-                Ok((_stream_id, quiche::h3::Event::Finished)) => {
+                Ok((stream_id, quiche::h3::Event::Finished)) => {
                     self.reqs_complete += 1;
                     let reqs_count = self.reqs.len();
 
@@ -1286,6 +1353,22 @@ impl HttpConn for Http3Conn {
                         "{}/{} responses received",
                         self.reqs_complete, reqs_count
                     );
+
+		    let req = self
+                        .reqs
+                        .iter_mut()
+                        .find(|r| r.stream_id == Some(stream_id))
+                        .unwrap();
+		    
+		    match &mut req.response_writer {
+                        Some(rw) => {
+                            rw.write_all(&timestamp_slice_to_diff(req.t_sent.unwrap(),
+								  req.t_first_byte.unwrap(),
+								  buf))
+                                .ok();
+                        },
+			None => warn!("No reponse writer found"),
+		    }
 
                     if self.reqs_complete == reqs_count {
                         info!(
