@@ -64,6 +64,7 @@ pub struct Encoder {
     //    rsrc: StaticRepairSymbolRateController,
     app_limited: bool,
     left_for_tail_protection: u64,
+    inrecemental: bool,
 }
 
 impl Encoder {
@@ -154,6 +155,10 @@ impl Encoder {
     pub fn set_reliability_level(&mut self, lvl: ReliabilityLevel) {
 	self.reliability_level = lvl;
     }
+
+    pub fn set_incremental(&mut self, i: bool) {
+	self.incremental = i;
+    }
   
     /// Initialize the Encoder with the maximum number of packets that can be simultaneously part of the sliding window.
     pub fn new(config: FecConfig) -> Result<Self, FecError> {
@@ -169,6 +174,7 @@ impl Encoder {
 	    recovered: 0,
 	    app_limited: true,
 	    left_for_tail_protection: 0,
+	    incremental: false,
         })
     }
 

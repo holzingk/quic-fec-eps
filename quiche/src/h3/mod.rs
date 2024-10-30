@@ -291,6 +291,8 @@ use num_traits::cast::ToPrimitive;
 use std::fmt;
 use std::fmt::Write;
 
+use crate::fec::ReliabilityLevel;
+
 #[cfg(feature = "qlog")]
 use qlog::events::h3::H3FrameCreated;
 #[cfg(feature = "qlog")]
@@ -1282,6 +1284,15 @@ impl Connection {
 
         conn.stream_priority(stream_id, urgency, priority.0[0].incremental)?;
 
+	
+	let reliability_level = if priority.0[0].burst_loss_tolerance > 0 {
+	    ReliabilityLevel::BurstLossTolerance(priority.0[0].burst_loss_tolerance as u64)
+	} else if priority.0[0].burst_loss_tolerance > 0 {
+	    ReliabilityLevel::FixedRedundancyRatio(priority.0[0].burst_loss_tolerance as f64 / 1000.0)
+	} else {
+	    ReliabilityLevel::RecoveryOnly
+	}
+	conn.stream_fec(stream_id, true, reliability_level, priority.0[0].incremental);
         self.send_headers(conn, stream_id, headers, fin)?;
 
         Ok(())
