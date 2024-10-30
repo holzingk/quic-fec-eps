@@ -58,6 +58,7 @@ pub struct CommonArgs {
     pub qpack_blocked_streams: Option<u64>,
     pub initial_cwnd_packets: u64,
     pub multipath: bool,
+    pub enable_fec: bool,
 }
 
 /// Creates a new `CommonArgs` structure using the provided [`Docopt`].
@@ -198,6 +199,8 @@ impl Args for CommonArgs {
 
         let multipath = args.get_bool("--multipath");
 
+	let enable_fec = args.get_bool("--enable-fec");
+
         CommonArgs {
             alpns,
             max_data,
@@ -252,6 +255,7 @@ impl Default for CommonArgs {
             qpack_blocked_streams: None,
             initial_cwnd_packets: 10,
             multipath: false,
+	    enable_fec: false,
         }
     }
 }
@@ -290,6 +294,7 @@ Options:
   --enable-active-migration   Enable active connection migration.
   --perform-migration      Perform connection migration on another source port.
   --multipath              Enable multipath support.
+  --enable-fec             Enable FEC support
   -A --address ADDR ...    Specify addresses to be used instead of the unspecified address. Non-routable addresses will lead to connectivity issues.
   -R --rm-addr TIMEADDR ...   Specify addresses to stop using after the provided time (format time,addr).
   -S --status TIMEADDRSTAT ...   Specify availability status to advertise to the peer after the provided time (format time,addr,available).
@@ -538,6 +543,7 @@ Options:
   --disable-pacing            Disable pacing (linux only).
   --initial-cwnd-packets PACKETS      The initial congestion window size in terms of packet count [default: 10].
   --multipath                 Enable multipath support.
+  --enable-fec                Enable FEC support.
   -h --help                   Show this screen.
 ";
 
