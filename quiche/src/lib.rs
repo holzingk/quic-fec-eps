@@ -5291,7 +5291,8 @@ impl Connection {
     /// If the use of FEC is not negotiated for this connection `Error::InvalidState` is returned.
     pub fn stream_fec(
 	&mut self, stream_id: u64, enable: bool,
-	reliability_level: ReliabilityLevel
+	reliability_level: ReliabilityLevel,
+	incremental: bool
     ) -> Result<()> {
 	if !self.fec_enabled {
 	    return Err(Error::InvalidState);
@@ -5310,8 +5311,9 @@ impl Connection {
 	    self.fec.entry(stream_id).or_insert(
 		Tetrys::new(fec_payload_length)
 		    .unwrap());
-	    self.fec.get_mut(&stream_id).unwrap().
-		encoder.set_reliability_level(reliability_level);
+	    let fec = self.fec.get_mut(&stream_id).unwrap();
+	    fec.encoder.set_reliability_level(reliability_level);
+	    fec.encoder.set_incremental(incremental);
 	}
 	
 	Ok(())
