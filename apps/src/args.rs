@@ -225,6 +225,7 @@ impl Args for CommonArgs {
             qpack_blocked_streams,
             initial_cwnd_packets,
             multipath,
+	    enable_fec,
         }
     }
 }

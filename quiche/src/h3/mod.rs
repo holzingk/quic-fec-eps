@@ -1291,8 +1291,8 @@ impl Connection {
 	    ReliabilityLevel::FixedRedundancyRatio(priority.0[0].burst_loss_tolerance as f64 / 1000.0)
 	} else {
 	    ReliabilityLevel::RecoveryOnly
-	}
-	conn.stream_fec(stream_id, true, reliability_level, priority.0[0].incremental);
+	};
+	conn.stream_fec(stream_id, true, reliability_level, priority.0[0].incremental).unwrap();
         self.send_headers(conn, stream_id, headers, fin)?;
 
         Ok(())

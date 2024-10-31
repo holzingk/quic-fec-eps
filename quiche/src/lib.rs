@@ -5294,9 +5294,12 @@ impl Connection {
 	reliability_level: ReliabilityLevel,
 	incremental: bool
     ) -> Result<()> {
-	if !self.fec_enabled {
+	if !self.fec_enabled && reliability_level != ReliabilityLevel::RecoveryOnly {
 	    return Err(Error::InvalidState);
 	}
+
+	let fec_enabled = self.fec_enabled;
+		
 	let stream = match self.get_or_create_stream(stream_id, true) {
             Ok(v) => v,
 	    
@@ -5304,7 +5307,10 @@ impl Connection {
 	    
             Err(e) => return Err(e),
         };
-	stream.fec = enable;
+
+	if fec_enabled {
+	    stream.fec = enable;
+	}
 
 	if stream.fec {
 	    let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
@@ -17625,7 +17631,7 @@ mod tests {
 	assert_eq!(pipe.handshake(), Ok(()));
 
 	// Enable FEC on stream #4
-	assert_eq!(pipe.client.stream_fec(4, true, ReliabilityLevel::RecoveryOnly), Ok(()));
+	assert_eq!(pipe.client.stream_fec(4, true, ReliabilityLevel::RecoveryOnly, true), Ok(()));
 
 	// Client sends data
         assert_eq!(pipe.client.stream_send(4, b"hello", true), Ok(5));
@@ -17671,7 +17677,7 @@ mod tests {
 	assert_eq!(pipe.handshake(), Ok(()));
 	
 	// Enable FEC on stream #4
-	assert_eq!(pipe.client.stream_fec(4, true, ReliabilityLevel::RecoveryOnly), Ok(()));
+	assert_eq!(pipe.client.stream_fec(4, true, ReliabilityLevel::RecoveryOnly, true), Ok(()));
 	// Client sends data
         assert_eq!(pipe.client.stream_send(4, b"hello", false), Ok(5));
 	// But information is lost
@@ -17749,7 +17755,7 @@ mod tests {
 	let data = data_str.as_bytes(); // 30kB
 	
 	// Enable FEC on stream #4
-	assert_eq!(pipe.client.stream_fec(4, true, ReliabilityLevel::BurstLossTolerance(5)), Ok(()));
+	assert_eq!(pipe.client.stream_fec(4, true, ReliabilityLevel::BurstLossTolerance(5), true), Ok(()));
 	// Client sendles data
 
         assert_eq!(pipe.client.stream_send(4, &data[..10_000], false), Ok(10_000));
