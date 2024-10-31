@@ -64,7 +64,7 @@ pub struct Encoder {
     //    rsrc: StaticRepairSymbolRateController,
     app_limited: bool,
     left_for_tail_protection: u64,
-    inrecemental: bool,
+    incremental: bool,
 }
 
 impl Encoder {
@@ -179,7 +179,7 @@ impl Encoder {
 	    recovered: 0,
 	    app_limited: true,
 	    left_for_tail_protection: 0,
-	    incremental: false,
+	    incremental: true,
         })
     }
 
