@@ -127,6 +127,11 @@ impl Encoder {
 	    return SymbolKind::Repair;
 	}
 
+	// we only send repair symbols for recovery and tail protection in the non-incremental case
+	if !self.incremental {
+	    return SymbolKind::Source;
+	}
+
 	// we cannot generate repair symbols out of thin air
 	if stats.in_flight == 0 {
 	    return SymbolKind::Source;
