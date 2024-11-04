@@ -304,15 +304,9 @@ impl HLSHierarchy {
 
 impl Default for HLSHierarchy {
     fn default() -> Self {
-        let mut hierarchy = HLSHierarchy::new();
-        let max_streams: u64 = 50;
-        let root = hierarchy.insert(3, false, 1, 0, 0, 0, None);
 
-        // This default range is due to Quiche's tests using stream ids between 0-50.
-        for sid in 0..max_streams {
-            let class = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
-            hierarchy.set_stream_id(class, sid);
-        }
+        // An empty hierarchy.
+        let mut hierarchy = HLSHierarchy::new();
 
         hierarchy
     }
