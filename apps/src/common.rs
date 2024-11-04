@@ -1566,7 +1566,7 @@ impl HttpConn for Http3Conn {
                         ));
                     }
 
-		    trace!("Priority is {}", String::from_utf8(priority.to_owned()).unwrap());
+		            trace!("Priority is {}", String::from_utf8(priority.to_owned()).unwrap());
 		    
                     #[cfg(feature = "sfv")]
                     let priority =
@@ -1574,9 +1574,9 @@ impl HttpConn for Http3Conn {
                         {
                             Ok(v) => v,
                             Err(_) => {
-				trace!("Using default priority");
-				quiche::h3::Priority::default()
-			    },
+				                error!("EPS parsing failed, using default priority");
+				                quiche::h3::Priority::default()
+                            },
                         };
 
                     #[cfg(not(feature = "sfv"))]

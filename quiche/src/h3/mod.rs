@@ -736,12 +736,12 @@ fn eps_parse_weight(bitem: Option<&sfv::BareItem>) -> std::result::Result<u32, c
 	None => Ok(0),
 	Some(bi) => match bi.as_decimal() {
 	    Some(v) => {
-		let f = v.to_f64().ok_or(Error::Done)?;
-		if f > 0.0 && f < 1.0 {
-		    Ok((f * 1000.0) as u32)
-		} else {
-		    Err(Error::Done)
-		}
+		    let f = v.to_f64().ok_or(Error::Done)?;
+
+            match v.to_f64() {
+                Some(v) => Ok((v * 1000.0) as u32),
+                None => Err(Error::Done),
+            }
 	    },
 	    None => Err(Error::Done),
 	}
@@ -916,102 +916,114 @@ impl TryFrom<&[u8]> for Priority {
     ///
     /// [Extensible Priorities]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     fn try_from(value: &[u8]) -> std::result::Result<Self, Self::Error> {
-	let dict = match sfv::Parser::parse_dictionary(value) {
-            Ok(v) => v,
+        trace!("Unparsed EPS field value = {:?}", value);
 
-            Err(_) => return Err(Error::Done),
-        };
+        let dict =
+            match sfv::Parser::parse_dictionary(value) {
+                Ok(v) => v,
+                Err(_) => return Err(Error::Done),
+            };
 
-	let mut prio = Vec::new();
-	
-	let urgency = match dict.get("u") {
-            // If there is a u parameter, try to read it as an Item of type
-            // Integer. If the value out of the spec's allowed range
-            // (0 through 7), that's an error so set it to the upper
-            // bound (lowest priority) to avoid interference with
-            // other streams.
-            Some(sfv::ListEntry::Item(item)) => eps_parse_urgency(Some(&item.bare_item))?,
+        let mut prio = Vec::new();
+
+        let urgency = match dict.get("u") {
+                // If there is a u parameter, try to read it as an Item of type
+                // Integer. If the value out of the spec's allowed range
+                // (0 through 7), that's an error so set it to the upper
+                // bound (lowest priority) to avoid interference with
+                // other streams.
+                Some(sfv::ListEntry::Item(item)) => eps_parse_urgency(Some(&item.bare_item))?,
+                Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+                // Omitted so use default value.
+                None => eps_parse_urgency(None)?,
+            };
+
+            let incremental = match dict.get("i") {
+                Some(sfv::ListEntry::Item(item)) =>
+            eps_parse_incremental(Some(&item.bare_item))?,
+
+                // Omitted so use default value.
+                 _ => eps_parse_incremental(None)?,
+            };
+
+        let weight = match dict.get("exp_w") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_weight(Some(&item.bare_item))?,
             Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-            // Omitted so use default value.
-            None => eps_parse_urgency(None)?,
+            // Omitted, let's use default
+            None => eps_parse_weight(None)?,
         };
 
-        let incremental = match dict.get("i") {
-            Some(sfv::ListEntry::Item(item)) =>
-		eps_parse_incremental(Some(&item.bare_item))?,
-
-            // Omitted so use default value.
-             _ => eps_parse_incremental(None)?,
+        let protection_ratio = match dict.get("exp_r") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_protection_ratio(Some(&item.bare_item))?,
+            Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+            // Omitted, let's use default
+            None => eps_parse_protection_ratio(None)?,
         };
 
-	let weight = match dict.get("exp_w") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_weight(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // Omitted, let's use default
-	    None => eps_parse_weight(None)?,
-	};
+        let burst_loss_tolerance = match dict.get("exp_b") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_burst_loss_tolerance(Some(&item.bare_item))?,
+            Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+            // In case it's empty, use default
+            None => eps_parse_burst_loss_tolerance(None)?,
+        };
 
-	let protection_ratio = match dict.get("exp_r") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_protection_ratio(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // Omitted, let's use default
-	    None => eps_parse_protection_ratio(None)?,
-	};
+        let repair_delay_tolerance = match dict.get("exp_alpha") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_repair_delay_tolerance(Some(&item.bare_item))?,
+            Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+            // Omitted, let's use default
+            None => eps_parse_repair_delay_tolerance(None)?,
+        };
 
-	let burst_loss_tolerance = match dict.get("exp_b") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_burst_loss_tolerance(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // In case it's empty, use default
-	    None => eps_parse_burst_loss_tolerance(None)?,
-	};
+        let id = match dict.get("exp_id") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_id(Some(&item.bare_item))?,
+            Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+            // Omitted,
+            None => eps_parse_id(None)?,
+        };
 
-	let repair_delay_tolerance = match dict.get("exp_alpha") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_repair_delay_tolerance(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // Omitted, let's use default
-	    None => eps_parse_repair_delay_tolerance(None)?,
-	};
+        prio.push(PriorityValues::new_experimental(
+            urgency, incremental, weight,  id, protection_ratio,
+            burst_loss_tolerance,
+            repair_delay_tolerance));
 
-	let id = match dict.get("exp_id") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_id(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // Omitted,
-	    None => eps_parse_id(None)?,
-	};
-	
-	prio.push(PriorityValues::new_experimental(
-	    urgency, incremental, weight,  id, protection_ratio, 
-	    burst_loss_tolerance,
-	    repair_delay_tolerance));
+        trace!("Pushed experimental priority values.");
 
-	match dict.get("exp_p") {
-	    // no path attribute
-	    None => {},
-	    Some(sfv::ListEntry::Item(_)) => return Err(Error::Done),
-	    Some(sfv::ListEntry::InnerList(ilist)) => {
-		for item in &ilist.items {
-		    let id = item.bare_item.as_str().map(|v| v.to_owned());
-		    
-		    let urgency = eps_parse_urgency(item.params.get("u"))?;
-		    
-		    let incremental = eps_parse_incremental(item.params.get("i"))?;
-		    let weight = eps_parse_weight(item.params.get("exp_w"))?;
-		    let protection_ratio = eps_parse_protection_ratio(item.params.get("exp_r"))?;
-		    let burst_loss_tolerance = eps_parse_burst_loss_tolerance(item.params.get("exp_b"))?;
-		    let repair_delay_tolerance = eps_parse_repair_delay_tolerance(item.params.get("exp_alpha"))?;
+        match dict.get("exp_p") {
+            // no path attribute
+            None => {
+                trace!("No exp_p path attribute found!");
+            },
+            Some(sfv::ListEntry::Item(_)) => {
+                trace!("exp_p list entry item: Done");
+                return Err(Error::Done)
+            },
+            Some(sfv::ListEntry::InnerList(ilist)) => {
+                trace!("Parsing exp_p inner list");
+                for item in &ilist.items {
+                    trace!("{:?}", item);
+                    let id = item.bare_item.as_str().map(|v| v.to_owned());
 
-		    prio.push(PriorityValues::new_experimental(
-			    urgency,
-                incremental,
-			    weight,
-			    id,
-                protection_ratio,
-			    burst_loss_tolerance,
-			    repair_delay_tolerance));
-		    }
-	    }
-	}
-	Ok(Self::new_hierarchical(prio))
+                    let urgency = eps_parse_urgency(item.params.get("u"))?;
+
+                    let incremental = eps_parse_incremental(item.params.get("i"))?;
+                    let weight = eps_parse_weight(item.params.get("exp_w"))?;
+                    let protection_ratio = eps_parse_protection_ratio(item.params.get("exp_r"))?;
+                    let burst_loss_tolerance = eps_parse_burst_loss_tolerance(item.params.get("exp_b"))?;
+                    let repair_delay_tolerance = eps_parse_repair_delay_tolerance(item.params.get("exp_alpha"))?;
+
+                    prio.push(PriorityValues::new_experimental(
+                        urgency,
+                        incremental,
+                        weight,
+                        id,
+                        protection_ratio,
+                        burst_loss_tolerance,
+                        repair_delay_tolerance));
+                    }
+            }
+        }
+
+        Ok(Self::new_hierarchical(prio))
     }
 }
 
@@ -4218,13 +4230,25 @@ mod tests {
 	    // Hierarchical prio
         assert_eq!(
             Ok(Priority::new_hierarchical(
-            vec!(
-                // leaf
-                PriorityValues::new_experimental(2, true, 600, None, 20, 0, 100),
-                // middle layer
-                PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))
+                vec!(
+                    // leaf
+                    PriorityValues::new_experimental(2, true, 600, None, 20, 0, 100),
+                    // middle layer
+                    PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))
             ),
             Priority::try_from(b"u=2, exp_w=0.6, i, exp_r=0.02, exp_alpha=0.1, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice()));
+
+        // Deep hierarchical prio
+        assert_eq!(
+            Ok(Priority::new_hierarchical(
+                vec!(
+                    // leaf
+                    PriorityValues::new_experimental(0, true, 0, None, 0, 0, 0),
+                    // middle layer
+                    PriorityValues::new_experimental(1, false, 1000, Some("b".to_string()), 0, 0 , 0),
+                    PriorityValues::new_experimental(2, false, 2000, Some("c".to_string()), 0, 0 , 0)))
+            ),
+            Priority::try_from(b"u=0, i, exp_p=(\"b\";u=1;exp_w=1.0 \"c\";u=2;exp_w=2.0)".as_slice()));
     }
 
     // Sample hierarchy specification, cf. page 9 and 26 of the HLS MA thesis
