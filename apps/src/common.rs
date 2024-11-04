@@ -142,10 +142,10 @@ fn make_resource_writer(
 /// Creates a vector wich contains a series of the current timestamp in u128 values.
 /// Length is round up to the next number divisable by 128
 fn make_body_with_timestamp(len: usize) -> Vec<u8> {
-    let vec_capacity = len.next_multiple_of(u128::BITS as usize);
+    let vec_capacity = len.next_multiple_of(std::mem::size_of::<u128>());
     let mut ret: Vec<u8> = Vec::with_capacity(vec_capacity);
 
-    let num_ts = vec_capacity / 128;
+    let num_ts = vec_capacity / std::mem::size_of::<u128>();
     
     let now = SystemTime::now().duration_since(UNIX_EPOCH)
         .expect("we are past unix epoch")
@@ -154,17 +154,13 @@ fn make_body_with_timestamp(len: usize) -> Vec<u8> {
     for _ in 0..num_ts {
 	ret.extend_from_slice(&now_bytes);
     }
+    trace!("Generated body with len of {}", ret.len());
     ret
     
 }
 
-fn timestamp_slice_to_diff(t_start: SystemTime, t_first_byte: SystemTime, buf: &[u8]) -> Vec<u8> {
-    let mut res: Vec<u8> = Vec::with_capacity(16 * 2 + buf.len() / 16);
-    let now = SystemTime::now().duration_since(UNIX_EPOCH)
-        .expect("we are past unix epoch")
-        .as_micros();
-    // should be divisable by 128
-    assert_eq!(buf.len().wrapping_rem_euclid(u128::BITS as usize), 0);
+fn output_preamble(t_start: SystemTime, t_first_byte: SystemTime) -> Vec<u8> {
+    let mut res = Vec::new();
     res.extend_from_slice(&t_start.duration_since(UNIX_EPOCH)
 			  .expect("no time travel")
 			  .as_micros()
@@ -173,14 +169,8 @@ fn timestamp_slice_to_diff(t_start: SystemTime, t_first_byte: SystemTime, buf: &
 			  .expect("not sideways in time")
 			  .as_micros()
 			  .to_be_bytes());
-    for chunk in buf.chunks(16) {
-	let sent_ts = u128::from_be_bytes(chunk.try_into().unwrap());
-	let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
-	let flight_time_bytes = flight_time.to_be_bytes();
-	res.extend_from_slice(&flight_time_bytes)
-    }
     res
-} 
+}
 
 fn autoindex(path: path::PathBuf, index: &str) -> path::PathBuf {
     if let Some(path_str) = path.to_str() {
@@ -326,6 +316,11 @@ pub fn length_from_query_string(url: &url::Url) -> Option<usize> {
 pub fn priority_field_value_from_query_string(url: &url::Url) -> Option<String> {
     let mut priority = "".to_string();
     for param in url.query_pairs() {
+	if param.0 == "exp_eps" {
+	    priority.clear();
+	    write!(priority, "{},", param.1).ok();
+	    break;
+	}
         if param.0 == "u" {
             write!(priority, "{}={},", param.0, param.1).ok();
         }
@@ -333,6 +328,7 @@ pub fn priority_field_value_from_query_string(url: &url::Url) -> Option<String> 
         if param.0 == "i" && param.1 == "1" {
             priority.push_str("i,");
         }
+
     }
 
     if !priority.is_empty() {
@@ -359,7 +355,9 @@ pub fn priority_from_query_string(url: &url::Url) -> Option<Priority> {
             incremental = Some(true);
         }
 	if param.0 == "exp_eps" {
-	    return Priority::try_from(param.1.as_bytes()).ok();
+	    let prio = Priority::try_from(param.1.as_bytes()).ok();
+	    trace!("exp_eps value is {:?}", prio);
+	    return prio;
 	}
     }
 
@@ -437,6 +435,7 @@ struct Http3Request {
     priority: Option<Priority>,
     response_hdrs: Vec<quiche::h3::Header>,
     response_body: Vec<u8>,
+    #[allow(dead_code)]
     response_body_max: usize,
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
     t_sent: Option<SystemTime>,
@@ -1144,7 +1143,7 @@ impl Http3Conn {
 
 	// Experimental use only:
 	// Desired length of the reply:
-	let desired_length = length_from_query_string(&url).expect("Length parameter must be replied");
+	let desired_length = length_from_query_string(&url).expect("Length parameter must be supplied");
 
         if let Some(p) = query_priority {
             priority = p.as_bytes().to_vec();
@@ -1322,11 +1321,39 @@ impl HttpConn for Http3Conn {
                             .find(|r| r.stream_id == Some(stream_id))
                             .unwrap();
 
-                        let len = std::cmp::min(
-                            read,
-                            req.response_body_max - req.response_body.len(),
-                        );
-                        req.response_body.extend_from_slice(&buf[..len]);
+                        // let len = std::cmp::min(
+                        //     read
+                        //     req.response_body_max - req.response_body.len(),
+                        // );
+			if req.response_body.is_empty() {
+			    req.response_body.extend_from_slice(
+				&output_preamble(req.t_sent.unwrap(),
+					    req.t_first_byte.unwrap()));
+			}
+			 let zeros_front = req.response_body.len()
+			    .next_multiple_of(std::mem::size_of::<u128>()) -
+			    req.response_body.len();
+			let aligned_len = ((read - zeros_front) / std::mem::size_of::<u128>())
+			    * std::mem::size_of::<u128>();
+			let zeros_back = read - aligned_len - zeros_front;
+			let now = SystemTime::now().duration_since(UNIX_EPOCH)
+			    .expect("we are past unix epoch")
+			    .as_micros();
+
+			for _ in 0..zeros_front {
+			    req.response_body.extend_from_slice(&[0]);
+			}
+			for chunk in buf[zeros_front..(aligned_len + zeros_front)].chunks(std::mem::size_of::<u128>()) {
+			    let sent_ts = u128::from_be_bytes(chunk.try_into().unwrap());
+			    let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
+			    let flight_time_bytes = flight_time.to_be_bytes();
+			    req.response_body.extend_from_slice(&flight_time_bytes);
+			}
+			for _ in 0..zeros_back {
+			    req.response_body.extend_from_slice(&[0]);
+			}
+			
+                        // req.response_body.extend_from_slice(&buf[..read]);
 
                         match &mut req.response_writer {
                             Some(_rw) => {
@@ -1359,13 +1386,16 @@ impl HttpConn for Http3Conn {
                         .iter_mut()
                         .find(|r| r.stream_id == Some(stream_id))
                         .unwrap();
-		    
+
+		    trace!("Stream {stream_id} is finished, received body len {}",
+			   req.response_body.len());
 		    match &mut req.response_writer {
                         Some(rw) => {
-                            rw.write_all(&timestamp_slice_to_diff(req.t_sent.unwrap(),
-								  req.t_first_byte.unwrap(),
-								  buf))
-                                .ok();
+			    rw.write_all(&req.response_body).unwrap();
+                            // rw.write_all(&timestamp_slice_to_diff(req.t_sent.unwrap(),
+			    // 					  req.t_first_byte.unwrap(),
+			    // 					  &req.response_body))
+                            //     .ok();
                         },
 			None => warn!("No reponse writer found"),
 		    }
@@ -1536,12 +1566,17 @@ impl HttpConn for Http3Conn {
                         ));
                     }
 
+		    trace!("Priority is {}", String::from_utf8(priority.to_owned()).unwrap());
+		    
                     #[cfg(feature = "sfv")]
                     let priority =
                         match quiche::h3::Priority::try_from(priority.as_slice())
                         {
                             Ok(v) => v,
-                            Err(_) => quiche::h3::Priority::default(),
+                            Err(_) => {
+				trace!("Using default priority");
+				quiche::h3::Priority::default()
+			    },
                         };
 
                     #[cfg(not(feature = "sfv"))]
