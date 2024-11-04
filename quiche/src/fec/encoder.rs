@@ -161,6 +161,9 @@ impl Encoder {
 	self.reliability_level = lvl;
     }
 
+
+    /// Tells FEC encoder that receiver can make use of partial data
+    /// Leads to repair data being scheduled interspersed with original information
     pub fn set_incremental(&mut self, i: bool) {
 	self.incremental = i;
     }
