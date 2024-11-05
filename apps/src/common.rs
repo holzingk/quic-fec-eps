@@ -1345,8 +1345,11 @@ impl HttpConn for Http3Conn {
 			}
 			for chunk in buf[zeros_front..(aligned_len + zeros_front)].chunks(std::mem::size_of::<u128>()) {
 			    let sent_ts = u128::from_be_bytes(chunk.try_into().unwrap());
+			    let now_rel = now.checked_sub(sent_ts).expect("no time travel possible");
 			    let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
-			    let flight_time_bytes = flight_time.to_be_bytes();
+			    let now_rel_bytes = u64::try_from(now_rel).expect("requests don't take long").to_be_bytes();
+			    let flight_time_bytes = u64::try_from(flight_time).to_be_bytes();
+			    req.response_body.extend_from_slice(&now_rel_bytes);
 			    req.response_body.extend_from_slice(&flight_time_bytes);
 			}
 			for _ in 0..zeros_back {
@@ -1389,6 +1392,11 @@ impl HttpConn for Http3Conn {
 
 		    trace!("Stream {stream_id} is finished, received body len {}",
 			   req.response_body.len());
+		    //write finalized timestamp, to compute tt completion
+		    req.response_body.extend_from_slice(&SystemTime::now().duration_since(UNIX_EPOCH)
+							.expect("we are past unix epoch")
+							.as_micros()
+							.to_be_bytes());
 		    match &mut req.response_writer {
                         Some(rw) => {
 			    rw.write_all(&req.response_body).unwrap();
