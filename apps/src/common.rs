@@ -1348,7 +1348,7 @@ impl HttpConn for Http3Conn {
 			    let now_rel = now.checked_sub(sent_ts).expect("no time travel possible");
 			    let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
 			    let now_rel_bytes = u64::try_from(now_rel).expect("requests don't take long").to_be_bytes();
-			    let flight_time_bytes = u64::try_from(flight_time).to_be_bytes();
+			    let flight_time_bytes = u64::try_from(flight_time).expect("only short flight times expected").to_be_bytes();
 			    req.response_body.extend_from_slice(&now_rel_bytes);
 			    req.response_body.extend_from_slice(&flight_time_bytes);
 			}
