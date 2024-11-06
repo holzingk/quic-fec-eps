@@ -332,23 +332,27 @@ impl fmt::Debug for HLSHierarchy {
 
             writeln!(
                 f,
-                "{}{}: balance: {}, weight: {}, {}residual: {}, guarantee: {}",
+                "{}{}: g:{}, w={}, i={}, r={}, b={}, a={}, blnc: {}, {}res: {}",
                 current_prefix,
                 match class.stream_id {
                     Some(stream_id) => format!("stream {}", stream_id),
                     None => class.id.to_string(),
                 },
-                class.balance,
+                class.guarantee,
                 class.weight,
+                class.incremental,
+                class.protection_ratio,
+                class.burst_loss_tolerance,
+                class.repair_delay_tolerance,
+                class.balance,
                 if class.fair_quota.is_some() {
-                    format!("fair quota: {}, ", class.fair_quota.unwrap())
+                    format!("fq: {}, ", class.fair_quota.unwrap())
                 } else if !class.children.is_empty() {
-                    "fair quota: None, ".to_string()
+                    "fq: None, ".to_string()
                 } else {
                     "".to_string()
                 },
                 class.residual,
-                class.guarantee,
             )?;
 
             let child_prefix = if depth == 0 {
