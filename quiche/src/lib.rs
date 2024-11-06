@@ -1451,7 +1451,7 @@ pub struct Connection {
     dcid_seq_to_abandon: VecDeque<u64>,
 
     /// The HLS Scheduler for streams.
-    hls_scheduler: HLSScheduler,
+    pub hls_scheduler: HLSScheduler,
 }
 
 /// Creates a new server-side connection.

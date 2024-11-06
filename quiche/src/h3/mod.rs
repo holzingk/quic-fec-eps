@@ -3298,7 +3298,6 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use crate::hls_scheduler::eps_to_hls;
     use crate::HLSHierarchy;
     use super::*;
 
@@ -4270,7 +4269,8 @@ mod tests {
         let z1 = hierarchy.insert(3, false, 2, 0, 0, 0, Some(z));
 
         // Convert relative weights into global ones.
-        hierarchy.generate_guarantees(capacity);
+        hierarchy.capacity = capacity;
+        hierarchy.generate_guarantees();
 
         assert_eq!(hierarchy.class(root_id).guarantee, capacity as i64);
         assert_eq!(hierarchy.class(x).guarantee, 5000);
@@ -4296,8 +4296,6 @@ mod tests {
         let c = Priority::try_from(b"u=1".as_slice());
 
         let priority_values_vector: Vec<Result<Priority>> = vec![a1, a2, b1, b2, c];
-
-        eps_to_hls(priority_values_vector);
 
         assert_eq!(0, 0);
     }

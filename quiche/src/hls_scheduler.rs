@@ -62,17 +62,20 @@ pub struct HLSHierarchy {
     pub(crate) classes: HashMap<u64, HLSClass>,
 
     /// Associates an EPS id with a class ID used by the HLS scheduler.
-    pub(crate) eps_id_to_hls_id: HashMap<String, u64>,
+    pub eps_id_to_hls_id: HashMap<String, u64>,
 
     /// Identifier of the root class.
-    pub(crate) root: u64,
+    pub root: u64,
+
+    /// The capacity of the hierarchy in bytes.
+    pub capacity: u64,
 
     /// Next class identifier to be assigned.
     next_id: u64,
 }
 
 impl HLSHierarchy {
-    fn guarantee_from_weight(&mut self, node_id: u64, capacity: u64) {
+    fn guarantee_from_weight(&mut self, node_id: u64) {
         let root = self.root;
 
         let mut ancestors_or_self = self.ancestors(node_id);
@@ -99,18 +102,20 @@ impl HLSHierarchy {
             }
         }
 
-        let guarantee = (capacity as f64) * product.iter().fold(1.0, |acc, x| acc * x);
+        let guarantee = (self.capacity as f64) * product.iter().fold(1.0, |acc, x| acc * x);
 
         if let Some(n) = self.classes.get_mut(&node_id) {
             n.guarantee = guarantee as i64;
         }
     }
 
-    pub(crate) fn generate_guarantees(&mut self, capacity: u64) {
+    /// Converts the relative weights in a hierarchy to absolute ones.
+    /// Requires a capacity to have been set.
+    pub fn generate_guarantees(&mut self) {
         let node_ids: Vec<u64> = self.classes.keys().copied().collect();
 
         for node_id in node_ids {
-            self.guarantee_from_weight(node_id, capacity);
+            self.guarantee_from_weight(node_id);
         }
     }
 }
@@ -148,19 +153,20 @@ impl HLSClass {
 }
 
 impl HLSHierarchy {
-    /// Creates a hierarchy consisting only of the root node.
+    /// Creates an empty hierarchy.
     pub fn new() -> HLSHierarchy {
         let root = 0;
         HLSHierarchy {
             classes: HashMap::new(),
             eps_id_to_hls_id: HashMap::new(),
             root,
+            capacity: 0,
             next_id: root,
         }
     }
 
     /// Returns a reference to the class with the given identifier.
-    pub(crate) fn class(&self, class_id: u64) -> &HLSClass {
+    pub fn class(&self, class_id: u64) -> &HLSClass {
         self.classes.get(&class_id).unwrap()
     }
 
@@ -303,11 +309,10 @@ impl HLSHierarchy {
 }
 
 impl Default for HLSHierarchy {
+    /// Creates a hierarchy consisting of a default root node only.
     fn default() -> Self {
-
-        // An empty hierarchy.
         let mut hierarchy = HLSHierarchy::new();
-
+        hierarchy.insert(3, false, 1, 0, 0, 0, None);
         hierarchy
     }
 }
@@ -396,7 +401,7 @@ pub struct HLSScheduler {
     pub(crate) q: i64,
 
     /// The class hierarchy.
-    pub(crate) hierarchy: HLSHierarchy,
+    pub hierarchy: HLSHierarchy,
 
     /// Whether the scheduler is in a main round.
     main_round: bool,
@@ -406,65 +411,6 @@ pub struct HLSScheduler {
 
     /// Class IDs (not stream IDs!) that have yet to be visited by the round-robin round.
     pub(crate) pending_leaves: VecDeque<u64>,
-}
-
-/// Converts an EPS-specified hierarchy to a hierarchy the HLS scheduler can use
-pub fn eps_to_hls(leaves: Vec<crate::h3::Result<Priority>>) -> HLSHierarchy {
-    // Create an empty hiearchy consisting of the root node only
-    let mut hierarchy = HLSHierarchy::new();
-    let root_id = hierarchy.insert(0,
-                                   false,
-                                   1,
-                                   0,
-                                   0,
-                                   0,
-                                   None);
-
-    for leaf in leaves {
-        let mut priority_values = match leaf {
-            Ok(Priority(pv)) => pv,
-            _ => continue,
-        };
-
-        // Reverse vector to append nodes top-down
-        priority_values.reverse();
-
-        // The first and default parent is the root; start with it.
-        let mut current_parent = root_id;
-        for pvs in priority_values {
-
-            if let Some(id) = pvs.id.clone() {
-                if hierarchy.eps_id_to_hls_id.contains_key(&id) {
-                    // Node has already been added. Use it as the parent in the next iteration.
-                    current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
-                    continue
-                }
-            }
-
-            current_parent = hierarchy.insert(
-                pvs.urgency,
-                pvs.incremental,
-                pvs.weight,
-                pvs.burst_loss_tolerance,
-                pvs.protection_ratio,
-                pvs.repair_delay_tolerance,
-                Some(current_parent));
-
-            if let Some(id) = pvs.id {
-                hierarchy.eps_id_to_hls_id.insert(id, current_parent);
-            }
-        }
-    }
-
-    // Convert the relative weights of the hierarchy into global weights.
-    // Global weights are global guarantees of bytes per round that each class receives, i.e.,
-    // the MINIMUM allocation in the worst case.
-    let capacity = 10_000;
-    hierarchy.generate_guarantees(capacity);
-
-    // println!("{:?}", hierarchy);
-
-    hierarchy
 }
 
 impl HLSScheduler {

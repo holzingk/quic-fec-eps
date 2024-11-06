@@ -48,7 +48,7 @@ use ring::rand::SecureRandom;
 
 use quiche::ConnectionId;
 
-use quiche::h3::NameValue;
+use quiche::h3::{NameValue};
 use quiche::h3::Priority;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1588,6 +1588,66 @@ impl HttpConn for Http3Conn {
                         stream_id,
                         priority
                     );
+
+                    // Determine minimum path MTU
+                    let mtu: usize = conn
+                        .path_stats()
+                        .filter_map(|p| Option::from(p.pmtu))
+                        .min()
+                        .unwrap_or(1500);
+
+                    trace!("Minimum MTU is {:?}", mtu);
+
+                    // Append the stream to the HLS hierarchy
+                    let hierarchy = &mut conn.hls_scheduler.hierarchy;
+
+                    // The first (and default) parent is the root; start with it.
+                    let mut current_parent = hierarchy.root;
+
+                    // Reverse priority values (pv) to append exp_p path parameters top-down.
+                    for pv in priority.0.iter().rev() {
+                        if let Some(id) = pv.id.clone() {
+                            if hierarchy.eps_id_to_hls_id.contains_key(&id) {
+                                // Class has already been added.
+                                // Use it as the parent in the next iteration.
+                                current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
+
+                                // Overwrite its pre-existing values.
+                                // let internal_class = hierarchy.class(current_parent);
+                                // internal_class.urgency = pv.urgency;
+                                // pv.incremental,
+                                // pv.weight,
+                                // pv.burst_loss_tolerance,
+                                // pv.protection_ratio,
+                                // pv.repair_delay_tolerance,
+                                continue
+                            }
+                        }
+
+                        // Insert the path element into the hierarchy and use it as the next parent.
+                        current_parent = hierarchy.insert(
+                            pv.urgency,
+                            pv.incremental,
+                            pv.weight,
+                            pv.burst_loss_tolerance,
+                            pv.protection_ratio,
+                            pv.repair_delay_tolerance,
+                            Some(current_parent)
+                        );
+
+                        // Leaves don't have an eps_p ID.
+                        // For new internal EPS IDs, store the generated class ID
+                        if let Some(id) = pv.id.clone() {
+                            hierarchy.eps_id_to_hls_id.insert(id, current_parent);
+                        }
+
+                        // Modify the root's capacity
+                        hierarchy.capacity += mtu as u64;
+                    }
+
+                    // Convert weights into global guarantees accounting for the new capacity
+                    hierarchy.generate_guarantees();
+                    trace!("{:?}", hierarchy);
 
                     match self.h3_conn.send_response_with_priority(
                         conn, stream_id, &headers, &priority, false,
