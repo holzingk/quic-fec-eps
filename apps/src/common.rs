@@ -1647,7 +1647,7 @@ impl HttpConn for Http3Conn {
 
                     // Convert weights into global guarantees accounting for the new capacity
                     hierarchy.generate_guarantees();
-                    trace!("{:?}", hierarchy);
+                    print!("{:?}", hierarchy);
 
                     match self.h3_conn.send_response_with_priority(
                         conn, stream_id, &headers, &priority, false,

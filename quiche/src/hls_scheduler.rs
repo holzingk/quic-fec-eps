@@ -332,7 +332,7 @@ impl fmt::Debug for HLSHierarchy {
 
             writeln!(
                 f,
-                "{}{}: g:{}, w={}, i={}, r={}, b={}, a={}, blnc: {}, {}res: {}",
+                "{}{}: g={}, w={}, u={}, i={}, r={}, b={}, a={}, blnc={}, {}res={}",
                 current_prefix,
                 match class.stream_id {
                     Some(stream_id) => format!("stream {}", stream_id),
@@ -340,6 +340,7 @@ impl fmt::Debug for HLSHierarchy {
                 },
                 class.guarantee,
                 class.weight,
+                class.urgency,
                 class.incremental,
                 class.protection_ratio,
                 class.burst_loss_tolerance,
