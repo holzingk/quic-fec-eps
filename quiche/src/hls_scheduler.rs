@@ -5,7 +5,7 @@ use crate::h3::{Priority, PriorityValues};
 
 /// Implementation of the Hierarchical Link Sharing (HLS) Scheduling algorithm.
 #[derive(Clone, Debug)]
-pub(crate) struct HLSClass {
+pub struct HLSClass {
     /// Unique identifier of the class.
     id: u64,
 
@@ -16,13 +16,13 @@ pub(crate) struct HLSClass {
     children: HashSet<u64>,
 
     /// The class' weight.
-    pub(crate) weight: u32,
+    pub weight: u32,
 
     /// Number of bytes the class is allowed to transmit.
-    pub(crate) balance: i64,
+    pub balance: i64,
 
     /// Permits for the transmission of bytes. Collected from descendants.
-    pub(crate) residual: i64,
+    pub residual: i64,
 
     /// Number of bytes that a child class with weight set to one can transmit.
     /// `None` if not yet computed.
@@ -171,7 +171,7 @@ impl HLSHierarchy {
     }
 
     /// Returns a mutable reference to the class with the given identifier.
-    pub(crate) fn mut_class(&mut self, class_id: u64) -> &mut HLSClass {
+    pub fn mut_class(&mut self, class_id: u64) -> &mut HLSClass {
         self.classes.get_mut(&class_id).unwrap()
     }
 

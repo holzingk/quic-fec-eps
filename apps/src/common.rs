@@ -1612,14 +1612,19 @@ impl HttpConn for Http3Conn {
                                 // Use it as the parent in the next iteration.
                                 current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
 
+                                trace!("Updating values for existing class {:?} (HLS id={:?})",
+                                    id, current_parent);
+
                                 // Overwrite its pre-existing values.
-                                // let internal_class = hierarchy.class(current_parent);
-                                // internal_class.urgency = pv.urgency;
-                                // pv.incremental,
-                                // pv.weight,
-                                // pv.burst_loss_tolerance,
-                                // pv.protection_ratio,
-                                // pv.repair_delay_tolerance,
+                                let internal_class = hierarchy.mut_class(current_parent);
+
+                                internal_class.weight = pv.weight;
+                                internal_class.urgency = pv.urgency;
+                                internal_class.incremental = pv.incremental;
+                                internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
+                                internal_class.protection_ratio = pv.protection_ratio;
+                                internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
+
                                 continue
                             }
                         }
@@ -1647,7 +1652,7 @@ impl HttpConn for Http3Conn {
 
                     // Convert weights into global guarantees accounting for the new capacity
                     hierarchy.generate_guarantees();
-                    print!("{:?}", hierarchy);
+                    trace!("{:?}", hierarchy);
 
                     match self.h3_conn.send_response_with_priority(
                         conn, stream_id, &headers, &priority, false,
