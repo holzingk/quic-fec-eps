@@ -1333,29 +1333,34 @@ impl HttpConn for Http3Conn {
 			 let zeros_front = req.response_body.len()
 			    .next_multiple_of(std::mem::size_of::<u128>()) -
 			    req.response_body.len();
-			let aligned_len = ((read - zeros_front) / std::mem::size_of::<u128>())
-			    * std::mem::size_of::<u128>();
-			let zeros_back = read - aligned_len - zeros_front;
-			let now = SystemTime::now().duration_since(UNIX_EPOCH)
-			    .expect("we are past unix epoch")
-			    .as_micros();
+			if read < zeros_front {
+			    for _ in 0.. read {
+				req.response_body.extend_from_slice(&[0]);
+			    }
+			} else {
+			    let aligned_len = ((read - zeros_front) / std::mem::size_of::<u128>())
+				* std::mem::size_of::<u128>();
+			    let zeros_back = read - aligned_len - zeros_front;
+			    let now = SystemTime::now().duration_since(UNIX_EPOCH)
+				.expect("we are past unix epoch")
+				.as_micros();
 
-			for _ in 0..zeros_front {
-			    req.response_body.extend_from_slice(&[0]);
+			    for _ in 0..zeros_front {
+				req.response_body.extend_from_slice(&[0]);
+			    }
+			    for chunk in buf[zeros_front..(aligned_len + zeros_front)].chunks(std::mem::size_of::<u128>()) {
+				let sent_ts = u128::from_be_bytes(chunk.try_into().unwrap());
+				let now_rel = now.checked_sub(sent_ts).expect("no time travel possible");
+				let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
+				let now_rel_bytes = u64::try_from(now_rel).expect("requests don't take long").to_be_bytes();
+				let flight_time_bytes = u64::try_from(flight_time).expect("only short flight times expected").to_be_bytes();
+				req.response_body.extend_from_slice(&now_rel_bytes);
+				req.response_body.extend_from_slice(&flight_time_bytes);
+			    }
+			    for _ in 0..zeros_back {
+				req.response_body.extend_from_slice(&[0]);
+			    }
 			}
-			for chunk in buf[zeros_front..(aligned_len + zeros_front)].chunks(std::mem::size_of::<u128>()) {
-			    let sent_ts = u128::from_be_bytes(chunk.try_into().unwrap());
-			    let now_rel = now.checked_sub(sent_ts).expect("no time travel possible");
-			    let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
-			    let now_rel_bytes = u64::try_from(now_rel).expect("requests don't take long").to_be_bytes();
-			    let flight_time_bytes = u64::try_from(flight_time).expect("only short flight times expected").to_be_bytes();
-			    req.response_body.extend_from_slice(&now_rel_bytes);
-			    req.response_body.extend_from_slice(&flight_time_bytes);
-			}
-			for _ in 0..zeros_back {
-			    req.response_body.extend_from_slice(&[0]);
-			}
-			
                         // req.response_body.extend_from_slice(&buf[..read]);
 
                         match &mut req.response_writer {
