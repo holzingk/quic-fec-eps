@@ -733,18 +733,18 @@ fn eps_parse_incremental(bitem: Option<&sfv::BareItem>) -> std::result::Result<b
 #[cfg(feature = "sfv")]
 fn eps_parse_weight(bitem: Option<&sfv::BareItem>) -> std::result::Result<u32, crate::h3::Error> {
     match bitem {
-	None => Ok(0),
-	Some(bi) => match bi.as_decimal() {
-	    Some(v) => {
-		    let f = v.to_f64().ok_or(Error::Done)?;
+	    None => Ok(1000),
+	    Some(bi) => match bi.as_decimal() {
+            Some(v) => {
+                let f = v.to_f64().ok_or(Error::Done)?;
 
-            match v.to_f64() {
-                Some(v) => Ok((v * 1000.0) as u32),
-                None => Err(Error::Done),
-            }
-	    },
-	    None => Err(Error::Done),
-	}
+                match v.to_f64() {
+                    Some(v) => Ok((v * 1000.0) as u32),
+                    None => Err(Error::Done),
+                }
+            },
+            None => Err(Error::Done),
+        }
     }
 }
 
@@ -836,11 +836,11 @@ impl Default for PriorityValues {
         Self {
             urgency: PRIORITY_URGENCY_DEFAULT,
             incremental: PRIORITY_INCREMENTAL_DEFAULT,
-	    weight: 0,
-	    id: None,
-	    protection_ratio: 0,
-	    burst_loss_tolerance: 0,
-	    repair_delay_tolerance: 0,
+            weight: 1000,
+            id: None,
+            protection_ratio: 0,
+            burst_loss_tolerance: 0,
+            repair_delay_tolerance: 0,
         }
     }
 }
@@ -854,10 +854,10 @@ impl Default for Priority {
 impl PriorityValues {
     /// Creates a new Priority.
     pub fn new(urgency: u8, incremental: bool) -> Self {
-	let mut prio: Self = Default::default();
-	prio.urgency = urgency;
-	prio.incremental = incremental;
-	prio
+        let mut prio: Self = Default::default();
+        prio.urgency = urgency;
+        prio.incremental = incremental;
+        prio
     }
 
     /// Creates a new Priority with experimental parameters
@@ -4242,7 +4242,7 @@ mod tests {
             Ok(Priority::new_hierarchical(
                 vec!(
                     // leaf
-                    PriorityValues::new_experimental(0, true, 0, None, 0, 0, 0),
+                    PriorityValues::new_experimental(0, true, 1000, None, 0, 0, 0),
                     // middle layer
                     PriorityValues::new_experimental(1, false, 1000, Some("b".to_string()), 0, 0 , 0),
                     PriorityValues::new_experimental(2, false, 2000, Some("c".to_string()), 0, 0 , 0)))

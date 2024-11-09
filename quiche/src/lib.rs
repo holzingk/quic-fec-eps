@@ -4364,6 +4364,11 @@ impl Connection {
             !dgram_emitted &&
             (consider_standby_paths || !path.is_standby())
         {
+            // Get the HLS scheduler.
+            let scheduler: &mut HLSScheduler = &mut self.hls_scheduler;
+
+            // println!("Hierarchy = {:?}", scheduler.hierarchy);
+
             while let Some(priority_key) = self.streams.peek_flushable() {
                 let stream_id = priority_key.id;
                 let stream = match self.streams.get_mut(stream_id) {
