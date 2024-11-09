@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fmt::Formatter;
@@ -15,7 +16,7 @@ pub struct HLSClass {
     /// Set of children of the class.
     children: HashSet<u64>,
 
-    /// The class' weight.
+    /// The class' weight (in promille).
     pub weight: u32,
 
     /// Number of bytes the class is allowed to transmit.
@@ -43,16 +44,19 @@ pub struct HLSClass {
     /// A guarantee in bytes per round, derived from relative weights and the root's capacity.
     pub guarantee: i64,
 
-    /// The urgency of the class
+    /// The urgency of the class.
     pub urgency: u8,
 
     /// Whether the class is marked as incremental.
     pub incremental: bool,
 
+    /// The class' burst loss tolerance.
     pub burst_loss_tolerance: u32,
 
+    /// The class' protection ratio.
     pub protection_ratio: u32,
 
+    /// Tolerated waiting time for protection repair symbols.
     pub repair_delay_tolerance: u32,
 }
 
@@ -120,7 +124,57 @@ impl HLSHierarchy {
     }
 }
 
+impl Eq for HLSClass {}
+
+impl PartialEq<Self> for HLSClass {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl PartialOrd<Self> for HLSClass {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // Ignore priority if class ID matches. Default EPS would use the stream ID here.
+        if self.id == other.id {
+            return Some(Ordering::Equal);
+        }
+
+        // First, order by urgency...
+        if self.urgency != other.urgency {
+            return self.urgency.partial_cmp(&other.urgency);
+        }
+
+        // ...when the urgency is the same, and both are not incremental, order
+        // by class ID. Default EPS would use the stream ID here.
+        if !self.incremental && !other.incremental {
+            return self.id.partial_cmp(&other.id);
+        }
+
+        // ...non-incremental takes priority over incremental...
+        if self.incremental && !other.incremental {
+            return Some(Ordering::Greater);
+        }
+
+        if !self.incremental && other.incremental {
+            return Some(Ordering::Less);
+        }
+
+        // ...finally, when both are incremental, `other` takes precedence (so
+        // `self` is always sorted after other same-urgency incremental
+        // entries).
+        Some(Ordering::Greater)
+    }
+}
+
+impl Ord for HLSClass {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // `partial_cmp()` never returns `None`, so this should be safe.
+        self.partial_cmp(other).unwrap()
+    }
+}
+
 impl HLSClass {
+    /// Instantiates a new HLS Class.
     pub fn new(id: u64,
                parent: Option<u64>,
                urgency: u8,
@@ -216,7 +270,7 @@ impl HLSHierarchy {
         id
     }
 
-    fn children(&self, node_id: u64) -> HashSet<u64> {
+    pub(crate) fn children(&self, node_id: u64) -> HashSet<u64> {
         if let Some(node) = self.classes.get(&node_id) {
             node.children.clone()
         } else {
@@ -396,6 +450,12 @@ impl fmt::Debug for HLSHierarchy {
 
 /// The attributes of the HLS scheduler.
 pub struct HLSScheduler {
+    /// The BFS frontier
+    pub(crate) bfs_frontier: VecDeque<u64>,
+
+    /// BFS explored set
+    bfs_explored: VecDeque<u64>,
+
     /// Set of active leaves.
     l_ac: HashSet<u64>,
 
@@ -422,6 +482,8 @@ impl HLSScheduler {
     /// Creates a new HLS scheduler.
     pub fn new(hierarchy: HLSHierarchy) -> HLSScheduler {
         HLSScheduler {
+            bfs_frontier: Default::default(),
+            bfs_explored: Default::default(),
             q: 0,
             hierarchy,
             i_ac: HashSet::new(),

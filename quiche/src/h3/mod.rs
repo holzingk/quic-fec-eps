@@ -736,8 +736,6 @@ fn eps_parse_weight(bitem: Option<&sfv::BareItem>) -> std::result::Result<u32, c
 	    None => Ok(1000),
 	    Some(bi) => match bi.as_decimal() {
             Some(v) => {
-                let f = v.to_f64().ok_or(Error::Done)?;
-
                 match v.to_f64() {
                     Some(v) => Ok((v * 1000.0) as u32),
                     None => Err(Error::Done),
