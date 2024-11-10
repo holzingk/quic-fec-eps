@@ -1287,8 +1287,8 @@ impl Connection {
 	
 	let reliability_level = if priority.0[0].burst_loss_tolerance > 0 {
 	    ReliabilityLevel::BurstLossTolerance(priority.0[0].burst_loss_tolerance as u64)
-	} else if priority.0[0].burst_loss_tolerance > 0 {
-	    ReliabilityLevel::FixedRedundancyRatio(priority.0[0].burst_loss_tolerance as f64 / 1000.0)
+	} else if priority.0[0].protection_ratio > 0 {
+	    ReliabilityLevel::FixedRedundancyRatio(priority.0[0].protection_ratio as f64 / 1000.0)
 	} else {
 	    ReliabilityLevel::RecoveryOnly
 	};
