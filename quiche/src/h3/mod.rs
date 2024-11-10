@@ -765,7 +765,7 @@ fn eps_parse_protection_ratio(bitem: Option<&sfv::BareItem>) -> std::result::Res
 	Some(bi) => match bi.as_decimal() {
 	    Some(v) => {
 		let f = v.to_f64().ok_or(Error::Done)?;
-		if f > 0.0 && f < 1.0 {
+		if f >= 0.0 && f < 1.0 {
 		    Ok((f * 1000.0) as u32)
 		} else {
 		    Err(Error::Done)
