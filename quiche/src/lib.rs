@@ -4372,33 +4372,8 @@ impl Connection {
 
             // There is no class in the hierarchy left to explore with BFS.
             // Configure the scheduler again to start a new BFS round.
-            if scheduler.bfs_frontier.is_empty() {
-                let hierarchy = &scheduler.hierarchy;
-                let root = hierarchy.root;
 
-                // Start exploring from the root.
-                scheduler.bfs_frontier.push_back(root);
-            }
-
-            // While the frontier is not empty, explore the hierarchy layer by layer.
-            if !scheduler.bfs_frontier.is_empty() {
-                // Dequeue the first element from the frontier.
-                if let Some(node) = scheduler.bfs_frontier.pop_front() {
-                    let hierarchy = &scheduler.hierarchy;
-                    let children = hierarchy.children(node);
-
-                    // Sort the children by their urgency and priority values.
-                    let mut priority_siblings: Vec<&HLSClass> = children
-                        .into_iter()
-                        .map(|c| hierarchy.class(c))
-                        .collect();
-
-                    // Sort layer by EPS priority.
-                    priority_siblings.sort();
-                }
-            }
-
-            // println!("Hierarchy = {:?}", scheduler.hierarchy);
+            // ....
 
             while let Some(priority_key) = self.streams.peek_flushable() {
                 let stream_id = priority_key.id;

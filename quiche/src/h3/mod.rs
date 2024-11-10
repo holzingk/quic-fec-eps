@@ -3296,7 +3296,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use crate::HLSHierarchy;
+    use crate::{HLSHierarchy, HLSScheduler};
     use super::*;
 
     use super::testing::*;
@@ -4246,6 +4246,39 @@ mod tests {
                     PriorityValues::new_experimental(2, false, 2000, Some("c".to_string()), 0, 0 , 0)))
             ),
             Priority::try_from(b"u=0, i, exp_p=(\"b\";u=1;exp_w=1.0 \"c\";u=2;exp_w=2.0)".as_slice()));
+    }
+
+    #[test]
+    pub fn hls_bfs_priority_order() {
+        let mut hierarchy = HLSHierarchy::default();
+
+        // Build tree in a top-down manner, reflecting EPS parsing.
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
+        let a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
+        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+
+        let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
+        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+
+        let c = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(root));
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        scheduler.bfs();
+
+        let mut explored = scheduler.bfs_explored.iter();
+
+        assert_eq!(*explored.next().unwrap(), root);
+        assert_eq!(*explored.next().unwrap(), c);
+        assert_eq!(*explored.next().unwrap(), a);
+        assert_eq!(*explored.next().unwrap(), b);
+        assert_eq!(*explored.next().unwrap(), a1);
+        assert_eq!(*explored.next().unwrap(), a2);
+        assert_eq!(*explored.next().unwrap(), b1);
+        assert_eq!(*explored.next().unwrap(), b2);
     }
 
     // Sample hierarchy specification, cf. page 9 and 26 of the HLS MA thesis

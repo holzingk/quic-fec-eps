@@ -8,7 +8,7 @@ use crate::h3::{Priority, PriorityValues};
 #[derive(Clone, Debug)]
 pub struct HLSClass {
     /// Unique identifier of the class.
-    id: u64,
+    pub(crate) id: u64,
 
     /// Parent class of the class.
     parent: Option<u64>,
@@ -453,8 +453,8 @@ pub struct HLSScheduler {
     /// The BFS frontier
     pub(crate) bfs_frontier: VecDeque<u64>,
 
-    /// BFS explored set
-    bfs_explored: VecDeque<u64>,
+    /// BFS discovered set
+    pub(crate) bfs_explored: VecDeque<u64>,
 
     /// Set of active leaves.
     l_ac: HashSet<u64>,
@@ -874,6 +874,48 @@ impl HLSScheduler {
                 if children.intersection(&active_classes).next().is_none() {
                     self.return_balance_to_parent(pid)
                 }
+            }
+        }
+    }
+
+    /// Calculates the BFS order in which the hierarchy should be traversed.
+    /// Result lies in `self.bfs_frontier`.
+    pub(crate) fn bfs(&mut self) {
+        if self.bfs_explored.is_empty() {
+            let hierarchy = &self.hierarchy;
+            let root = hierarchy.root;
+
+            // Start exploring from the root.
+            self.bfs_frontier.push_back(root);
+        }
+
+        // While the frontier is not empty, explore the hierarchy layer by layer.
+        while !self.bfs_frontier.is_empty() {
+            // Dequeue the first element from the frontier.
+            if let Some(node) = self.bfs_frontier.pop_front() {
+                let hierarchy = &self.hierarchy;
+                let children = hierarchy.children(node);
+
+                // Sort the children by their urgency and priority values.
+                let mut priority_siblings: Vec<&HLSClass> = children
+                    .into_iter()
+                    .map(|c| hierarchy.class(c))
+                    .collect();
+
+                // Sort by class ID first to aovid fuzzy tests, as sets have no defined order.
+                // HLS IDs should reflect the order of the requests as a tiebraker.
+                priority_siblings.sort_by_key(|sibling| sibling.id);
+
+                // Now, sort the layer by EPS priority.
+                priority_siblings.sort();
+
+                // Enqueue newly found classes in priority order.
+                for ps in priority_siblings.iter() {
+                    self.bfs_frontier.push_back(ps.id);
+                }
+
+                // Mark the current node as explored,
+                self.bfs_explored.push_back(node);
             }
         }
     }
