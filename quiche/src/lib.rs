@@ -4249,7 +4249,7 @@ impl Connection {
                 }
             }
         }
-	let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
+	let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
         let path = self.paths.get_mut(send_pid)?;
 
         // Create CONNECTION_CLOSE frame. Try to send this only on the active
@@ -5315,7 +5315,7 @@ impl Connection {
 	}
 
 	if stream.fec {
-	    let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
+	    let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
 	    self.fec.entry(stream_id).or_insert(
 		Tetrys::new(fec_payload_length)
 		    .unwrap());
@@ -7943,7 +7943,7 @@ impl Connection {
 		data
 	    } => {
 		trace!("{} Processing repair frame", self.trace_id);
-		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
+		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
 		self.fec.entry(fec_session).or_insert(
 		    Tetrys::new(fec_payload_length)
 			.unwrap());
@@ -7968,7 +7968,7 @@ impl Connection {
 		fec_protected_payload
 	    } => {
 		trace!("{} Received Source Symbol {sid}", self.trace_id);
-		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
+		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
 		self.fec.entry(fec_session).or_insert(
 		    Tetrys::new(fec_payload_length)
 			.unwrap());
@@ -7987,7 +7987,7 @@ impl Connection {
 		next_source_symbol,
 	    } => {
 		trace!("{} received SymbolAck number {next_source_symbol}", self.trace_id);
-		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 50;
+		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
 		self.fec.entry(fec_session).or_insert(
 		    Tetrys::new(fec_payload_length)
 			.unwrap());
