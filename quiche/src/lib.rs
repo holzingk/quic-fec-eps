@@ -4589,10 +4589,11 @@ impl Connection {
                 let max_len = match left.checked_sub(hdr_len + max_repair_header_len) {
                     Some(v) => v,
                     None => {
-                        let priority_key = Arc::clone(&stream.priority_key);
-                        self.streams.remove_flushable(&priority_key);
+                        // let priority_key = Arc::clone(&stream.priority_key);
+                        // self.streams.remove_flushable(&priority_key);
 			trace!("hdr_len {hdr_len} is too long");
-                        continue;
+			// continue;
+                        break;
                     },
                 };
                 let (mut source_symbol_and_stream_hdr, mut stream_payload) =
