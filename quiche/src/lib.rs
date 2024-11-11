@@ -4364,6 +4364,7 @@ impl Connection {
 	    
 	    // if there are no outstanding data
 	    if !writable_stream.send.ready() {
+		trace!("Stream {writable_stream_id} is flushed");
 		self.fec.get_mut(&writable_stream_id).map(|tetrys| tetrys.encoder.notify_flushed());
 	    }
 	}

@@ -109,10 +109,11 @@ impl Encoder {
 	}
     }
 
-    /// Returns the kind of symbol that should be sent in the next packet
+        /// Returns the kind of symbol that should be sent in the next packet
     pub fn should_send_next(&self) -> SymbolKind {
 	// recovery has highest priority
 	if self.lost > 0 {
+	    trace!("Next repair symbol should be sent due to recovery");
 	    return SymbolKind::Repair;
 	}
 	
@@ -120,25 +121,24 @@ impl Encoder {
 
 	// we cannot generate repair symbols out of thin air
 	if stats.in_flight == 0 {
+	    trace!("Next source symbol should be sent, as nothing is in flight");
 	    return SymbolKind::Source;
 	}
 
 	if self.left_for_tail_protection > 0 {
+	    trace!("Next repair symbol should be sent, We are in tail protection");
 	    return SymbolKind::Repair;
 	}
 
 	// we only send repair symbols for recovery and tail protection in the non-incremental case
 	if !self.incremental {
+	    trace!("Next source symbol should be sent, as we are non incremental");
 	    return SymbolKind::Source;
 	}
 
-	// we cannot generate repair symbols out of thin air
-	if stats.in_flight == 0 {
-	    return SymbolKind::Source;
-	}
-	
 	let should_p = match self.reliability_level {
 	    ReliabilityLevel::RecoveryOnly => {
+		trace!("Next source symbol should be sent as in recovery only and no lost packets");
 		return SymbolKind::Source;
 	    },
 	    ReliabilityLevel::BurstLossTolerance(b) => {
@@ -150,12 +150,14 @@ impl Encoder {
 	};
 	
 	if stats.protection_ratio < should_p {
+	    trace!("Less than desired burst loss tolerance, so send repair symbol next");
 	    return SymbolKind::Repair
 	} else {
+	    trace!("Enough protected packets, send source symbol next");
 	    return SymbolKind::Source
 	}
     }
-
+    
     /// Sets the reliability level that is to be respected by the redundancy scheduler
     pub fn set_reliability_level(&mut self, lvl: ReliabilityLevel) {
 	self.reliability_level = lvl;
