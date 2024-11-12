@@ -453,11 +453,8 @@ pub struct HLSScheduler {
     /// The BFS frontier
     pub(crate) bfs_frontier: VecDeque<u64>,
 
-    /// BFS discovered set
-    pub(crate) bfs_explored: VecDeque<u64>,
-
     /// Set of active leaves.
-    l_ac: HashSet<u64>,
+    pub(crate) l_ac: HashSet<u64>,
 
     /// Set of active internal classes.
     i_ac: HashSet<u64>,
@@ -483,7 +480,6 @@ impl HLSScheduler {
     pub fn new(hierarchy: HLSHierarchy) -> HLSScheduler {
         HLSScheduler {
             bfs_frontier: Default::default(),
-            bfs_explored: Default::default(),
             q: 0,
             hierarchy,
             i_ac: HashSet::new(),
@@ -878,16 +874,18 @@ impl HLSScheduler {
         }
     }
 
-    /// Calculates the BFS order in which the hierarchy should be traversed.
-    /// Result lies in `self.bfs_frontier`.
-    pub(crate) fn bfs(&mut self) {
-        if self.bfs_explored.is_empty() {
-            let hierarchy = &self.hierarchy;
-            let root = hierarchy.root;
+    /// Uses BFS to determine the set of active classes (internal and leaf classes)
+    /// for the current scheduling round.
+    pub(crate) fn backlogged_classes_from_hierarchy(&mut self) {
+        let hierarchy = &self.hierarchy;
+        let root = hierarchy.root;
 
-            // Start exploring from the root.
-            self.bfs_frontier.push_back(root);
-        }
+        // Let's reset the set of active classes at the start of a new round for now
+        self.i_ac = HashSet::new();
+        self.l_ac = HashSet::new();
+
+        // Start exploring from the root.
+        self.bfs_frontier.push_back(root);
 
         // While the frontier is not empty, explore the hierarchy layer by layer.
         while !self.bfs_frontier.is_empty() {
@@ -909,13 +907,38 @@ impl HLSScheduler {
                 // Now, sort the layer by EPS priority.
                 priority_siblings.sort();
 
-                // Enqueue newly found classes in priority order.
-                for ps in priority_siblings.iter() {
-                    self.bfs_frontier.push_back(ps.id);
-                }
+                // Now, iterate over the children to prune the search tree.
+                // We only include nodes at the same (and highest) urgency level.
+                // The layer is already sorted. So the highest urgency is at the front.
+                if let Some(class) = priority_siblings.first() {
+                    let max_urgency = class.urgency;
 
-                // Mark the current node as explored,
-                self.bfs_explored.push_back(node);
+                    // Now, we filter the layer to only keep nodes at that urgency level.
+                    let backlogged_classes: Vec<&&HLSClass> = priority_siblings
+                        .iter()
+                        .filter(|c| c.urgency == max_urgency)
+                        .collect();
+
+                    // Enqueue newly found classes in priority order.
+                    for ps in backlogged_classes.iter() {
+                        let id = ps.id;
+
+                        // If the class is a leaf, mark it as an active leaf.
+                        if ps.children.is_empty() {
+                            self.l_ac.insert(id);
+                        } else {
+                            // Mark it as an active internal class and continue the search.
+                            self.i_ac.insert(id);
+                            self.bfs_frontier.push_back(id);
+                        }
+
+                        // Break if the class is not incremental, preventing non-incremental classes
+                        // from sharing bandwidth.
+                        if !ps.incremental {
+                            break;
+                        }
+                    }
+                }
             }
         }
     }

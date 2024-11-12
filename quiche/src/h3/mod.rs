@@ -4267,18 +4267,51 @@ mod tests {
 
         let mut scheduler = HLSScheduler::new(hierarchy);
 
-        scheduler.bfs();
+        scheduler.backlogged_classes_from_hierarchy();
 
-        let mut explored = scheduler.bfs_explored.iter();
+        // Only C should be scheduled.
+        assert_eq!(scheduler.l_ac.len(), 1);
+        assert!(scheduler.l_ac.contains(&c));
 
-        assert_eq!(*explored.next().unwrap(), root);
-        assert_eq!(*explored.next().unwrap(), c);
-        assert_eq!(*explored.next().unwrap(), a);
-        assert_eq!(*explored.next().unwrap(), b);
-        assert_eq!(*explored.next().unwrap(), a1);
-        assert_eq!(*explored.next().unwrap(), a2);
-        assert_eq!(*explored.next().unwrap(), b1);
-        assert_eq!(*explored.next().unwrap(), b2);
+        // Now, simulate C finishing the transmission and leaving the hierarchy.
+        let mut hierarchy = HLSHierarchy::default();
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
+        let a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
+        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+
+        let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
+        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        scheduler.backlogged_classes_from_hierarchy();
+
+        assert_eq!(scheduler.l_ac.len(), 3);
+        assert!(scheduler.l_ac.contains(&a1));
+        assert!(scheduler.l_ac.contains(&b1));
+        assert!(scheduler.l_ac.contains(&b2));
+
+        // Now, suppose A1 finishes.
+        let mut hierarchy = HLSHierarchy::default();
+        let root = hierarchy.root;
+        let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
+        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+
+        let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
+        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+
+        println!("hierarchy: {:?}", hierarchy);
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        scheduler.backlogged_classes_from_hierarchy();
+
+        assert_eq!(scheduler.l_ac.len(), 3);
+        assert!(scheduler.l_ac.contains(&a2));
+        assert!(scheduler.l_ac.contains(&b1));
+        assert!(scheduler.l_ac.contains(&b2));
     }
 
     // Sample hierarchy specification, cf. page 9 and 26 of the HLS MA thesis
