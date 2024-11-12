@@ -114,7 +114,11 @@ impl Encoder {
 	// recovery has highest priority
 	if self.lost > 0 {
 	    trace!("Next repair symbol should be sent due to recovery");
-	    return SymbolKind::Repair;
+	    if self.buffered_symbols() > 0 {
+		return SymbolKind::Repair;
+	    } else {
+		trace!("Cannot send as symbol buffer is empty");
+	    }
 	}
 	
 	let stats = self.get_stats();
@@ -162,7 +166,6 @@ impl Encoder {
     pub fn set_reliability_level(&mut self, lvl: ReliabilityLevel) {
 	self.reliability_level = lvl;
     }
-
 
     /// Tells FEC encoder that receiver can make use of partial data
     /// Leads to repair data being scheduled interspersed with original information

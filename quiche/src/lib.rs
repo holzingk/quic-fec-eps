@@ -3625,11 +3625,20 @@ impl Connection {
                     },
 
 		    // Inform FEC about detected symbol loss
-                    frame::Frame::SourceSymbolHeader { fec_session, .. } | frame::Frame::Repair { fec_session, .. } => {
+                    frame::Frame::SourceSymbolHeader { fec_session, sid, .. } => {
+			trace!("Informing encoder of fec session {fec_session} about loss of Source Symbol {sid}");
 			if self.fec.get_mut(&fec_session).map(|tetrys| tetrys.encoder.on_detected_loss()).is_none() {
 			    warn!("Detected loss of unknown fec session {fec_session}");
 			}
 		    },
+
+		    frame::Frame::Repair { fec_session, smallest_sid, highest_sid, .. }  => {
+			trace!("Informing encoder of fec session {fec_session} about loss of Repair Symbol {smallest_sid} - {highest_sid}");
+			if self.fec.get_mut(&fec_session).map(|tetrys| tetrys.encoder.on_detected_loss()).is_none() {
+			    warn!("Detected loss of unknown fec session {fec_session}");
+			}
+
+		    }
 
 		    // Ignore the rest
 		    _ => {},
