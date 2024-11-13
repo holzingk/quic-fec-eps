@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fmt::Formatter;
-use crate::h3::{Priority, PriorityValues};
 
 /// Implementation of the Hierarchical Link Sharing (HLS) Scheduling algorithm.
 #[derive(Clone, Debug)]
@@ -207,16 +206,19 @@ impl HLSClass {
 }
 
 impl HLSHierarchy {
-    /// Creates an empty hierarchy.
+    /// Creates a hierarchy consisting of a default root node only.
     pub fn new() -> HLSHierarchy {
         let root = 0;
-        HLSHierarchy {
+        let mut hierarchy = HLSHierarchy {
             classes: HashMap::new(),
             eps_id_to_hls_id: HashMap::new(),
             root,
             capacity: 0,
             next_id: root,
-        }
+        };
+
+        hierarchy.insert(3, false, 1, 0, 0, 0, None);
+        hierarchy
     }
 
     /// Returns a reference to the class with the given identifier.
@@ -363,8 +365,21 @@ impl HLSHierarchy {
 }
 
 impl Default for HLSHierarchy {
-    /// Creates a hierarchy consisting of a default root node only.
+    /// Sample hierarchy used for testing
     fn default() -> Self {
+        // let mut hierarchy = HLSHierarchy::new();
+        // let max_streams: u64 = 50;
+        // let root = hierarchy.root;
+        //
+        // // This default range is due to Quiche's tests using stream ids between 0-50.
+        // for sid in 0..max_streams {
+        //     let class = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
+        //     hierarchy.set_stream_id(class, sid);
+        //     hierarchy.capacity += 1500;
+        // }
+        //
+        // hierarchy
+
         let mut hierarchy = HLSHierarchy::new();
         hierarchy.insert(3, false, 1, 0, 0, 0, None);
         hierarchy
@@ -451,7 +466,7 @@ impl fmt::Debug for HLSHierarchy {
 /// The attributes of the HLS scheduler.
 pub struct HLSScheduler {
     /// The BFS frontier
-    pub(crate) bfs_frontier: VecDeque<u64>,
+    bfs_frontier: VecDeque<u64>,
 
     /// Set of active leaves.
     pub(crate) l_ac: HashSet<u64>,
@@ -617,7 +632,12 @@ impl HLSScheduler {
     }
 
     /// Prepares the round-robin scheduler for a new main round.
+    /// `backlogged_streams`: Vector of flushable stream IDs
     pub(crate) fn init_round(&mut self, backlogged_streams: Vec<u64>) {
+        // Generate guarantees for the current hierarchy
+        self.hierarchy.generate_guarantees();
+
+        let l_ac_eps = self.backlogged_classes_from_hierarchy();
         let root_id = self.hierarchy.root;
 
         // Active classes are determined at the start of every round.
@@ -629,6 +649,7 @@ impl HLSScheduler {
 
         let mut i_ac: HashSet<u64> = HashSet::new();
         let mut l_ac: HashSet<u64> = HashSet::new();
+
         let mut pending_leaves: VecDeque<u64> = VecDeque::new();
 
         // Initialize the scheduler before there are any active classes.
@@ -777,7 +798,7 @@ impl HLSScheduler {
 
         trace!(
             "Streams {:?} backlogged. Starting {} round: {:?}",
-            &backlogged_streams,
+            &self.pending_leaves,
             if !do_surplus { "main" } else { "surplus" },
             &self.hierarchy
         );
@@ -876,13 +897,12 @@ impl HLSScheduler {
 
     /// Uses BFS to determine the set of active classes (internal and leaf classes)
     /// for the current scheduling round.
-    pub(crate) fn backlogged_classes_from_hierarchy(&mut self) {
+    pub(crate) fn backlogged_classes_from_hierarchy(&mut self) -> HashSet<u64> {
         let hierarchy = &self.hierarchy;
         let root = hierarchy.root;
 
         // Let's reset the set of active classes at the start of a new round for now
-        self.i_ac = HashSet::new();
-        self.l_ac = HashSet::new();
+        let mut l_ac_eps: HashSet<u64> = HashSet::new();
 
         // Start exploring from the root.
         self.bfs_frontier.push_back(root);
@@ -925,10 +945,9 @@ impl HLSScheduler {
 
                         // If the class is a leaf, mark it as an active leaf.
                         if ps.children.is_empty() {
-                            self.l_ac.insert(id);
+                            l_ac_eps.insert(id);
                         } else {
-                            // Mark it as an active internal class and continue the search.
-                            self.i_ac.insert(id);
+                            // Continue the search starting from this internal node.
                             self.bfs_frontier.push_back(id);
                         }
 
@@ -941,5 +960,7 @@ impl HLSScheduler {
                 }
             }
         }
+
+        l_ac_eps
     }
 }

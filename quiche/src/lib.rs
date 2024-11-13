@@ -416,7 +416,6 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use smallvec::SmallVec;
-use crate::hls_scheduler::HLSClass;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -17280,7 +17279,6 @@ pub use crate::path::SocketAddrIter;
 pub use crate::recovery::CongestionControlAlgorithm;
 pub use crate::hls_scheduler::HLSScheduler;
 pub use crate::hls_scheduler::HLSHierarchy;
-
 pub use crate::stream::StreamIter;
 
 mod cid;

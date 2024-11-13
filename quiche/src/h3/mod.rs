@@ -817,17 +817,21 @@ pub struct Priority(pub Vec<PriorityValues>);
 #[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct PriorityValues {
+    /// Urgency, ranging from 0-7, where 0 is the highest urgency.
     pub urgency: u8,
+    /// Whether the stream can be processed online or should be received in full.
     pub incremental: bool,
+    /// Relative weight of the class in the stream hierarchy.
     pub weight: u32,
+    /// The internal class' ID.
     pub id: Option<String>,
-    // in promille, cannot implement Eq for float types
+    /// Protectio ratio in promille (cannot implement Eq for float types).
     pub protection_ratio: u32,
+    /// The burst loss tolerance.
     pub burst_loss_tolerance: u32,
-    // in promille, cannot implement Eq for float types
+    /// The repair delay tolerance in promille (cannot implement Eq for float types).
     pub repair_delay_tolerance: u32,
 }
-
 
 impl Default for PriorityValues {
     fn default() -> Self {
@@ -4250,7 +4254,7 @@ mod tests {
 
     #[test]
     pub fn hls_bfs_priority_order() {
-        let mut hierarchy = HLSHierarchy::default();
+        let mut hierarchy = HLSHierarchy::new();
 
         // Build tree in a top-down manner, reflecting EPS parsing.
         let root = hierarchy.root;
@@ -4267,14 +4271,14 @@ mod tests {
 
         let mut scheduler = HLSScheduler::new(hierarchy);
 
-        scheduler.backlogged_classes_from_hierarchy();
+        let l_ac_eps = scheduler.backlogged_classes_from_hierarchy();
 
         // Only C should be scheduled.
-        assert_eq!(scheduler.l_ac.len(), 1);
-        assert!(scheduler.l_ac.contains(&c));
+        assert_eq!(l_ac_eps.len(), 1);
+        assert!(l_ac_eps.contains(&c));
 
         // Now, simulate C finishing the transmission and leaving the hierarchy.
-        let mut hierarchy = HLSHierarchy::default();
+        let mut hierarchy = HLSHierarchy::new();
         let root = hierarchy.root;
 
         let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
@@ -4286,15 +4290,15 @@ mod tests {
         let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
 
         let mut scheduler = HLSScheduler::new(hierarchy);
-        scheduler.backlogged_classes_from_hierarchy();
+        let l_ac_eps = scheduler.backlogged_classes_from_hierarchy();
 
-        assert_eq!(scheduler.l_ac.len(), 3);
-        assert!(scheduler.l_ac.contains(&a1));
-        assert!(scheduler.l_ac.contains(&b1));
-        assert!(scheduler.l_ac.contains(&b2));
+        assert_eq!(l_ac_eps.len(), 3);
+        assert!(l_ac_eps.contains(&a1));
+        assert!(l_ac_eps.contains(&b1));
+        assert!(l_ac_eps.contains(&b2));
 
         // Now, suppose A1 finishes.
-        let mut hierarchy = HLSHierarchy::default();
+        let mut hierarchy = HLSHierarchy::new();
         let root = hierarchy.root;
         let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
         let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
@@ -4302,16 +4306,15 @@ mod tests {
         let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
         let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
         let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
-
-        println!("hierarchy: {:?}", hierarchy);
+        
         let mut scheduler = HLSScheduler::new(hierarchy);
 
-        scheduler.backlogged_classes_from_hierarchy();
+        let l_ac_eps = scheduler.backlogged_classes_from_hierarchy();
 
-        assert_eq!(scheduler.l_ac.len(), 3);
-        assert!(scheduler.l_ac.contains(&a2));
-        assert!(scheduler.l_ac.contains(&b1));
-        assert!(scheduler.l_ac.contains(&b2));
+        assert_eq!(l_ac_eps.len(), 3);
+        assert!(l_ac_eps.contains(&a2));
+        assert!(l_ac_eps.contains(&b1));
+        assert!(l_ac_eps.contains(&b2));
     }
 
     // Sample hierarchy specification, cf. page 9 and 26 of the HLS MA thesis
@@ -4320,7 +4323,7 @@ mod tests {
         let capacity = 10_000;
         let mut hierarchy = HLSHierarchy::new();
 
-        let root_id = hierarchy.insert(1, false, 1, 0, 0, 0, None);
+        let root_id = hierarchy.root;
 
         let x = hierarchy.insert(3, false, 5, 0, 0, 0, Some(root_id));
 
