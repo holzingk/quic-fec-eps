@@ -7045,6 +7045,11 @@ impl Connection {
     fn get_or_create_stream(
         &mut self, id: u64, local: bool,
     ) -> Result<&mut stream::Stream> {
+        let path_mtu = self
+            .path_stats()
+            .filter_map(|p| Option::from(p.pmtu))
+            .min()
+            .unwrap_or(1500) as u64;
 
         let result = self.streams.get_or_create(
             id,
@@ -7090,6 +7095,7 @@ impl Connection {
 
                 // Set the stream ID
                 hierarchy.mut_class(new_stream).stream_id = Some(stream_id);
+                hierarchy.capacity += path_mtu;
             }
         }
 
