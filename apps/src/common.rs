@@ -54,6 +54,7 @@ use quiche::h3::Priority;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::str::FromStr;
 use std::convert::TryInto;
+use itertools::Itertools;
 
 pub fn stdout_sink(out: String) {
     print!("{out}");
@@ -1700,7 +1701,31 @@ impl HttpConn for Http3Conn {
                     );
                 },
 
-                Ok((_stream_id, quiche::h3::Event::Finished)) => (),
+                Ok((stream_id, quiche::h3::Event::Finished)) => {
+                    // Remove the stream from the hierarchy.
+                    let hierarchy = &mut conn.hls_scheduler.hierarchy;
+                    let root = hierarchy.root;
+
+                    let leaves = hierarchy.leaf_descendants(root);
+
+                    // Find the leaf with the corresponding stream ID
+                    if let Some(class_id) = leaves.iter().find_or_first(|l| hierarchy.class(**l).stream_id == Option::from(stream_id)) {
+                        let mut class = hierarchy.class(*class_id);
+
+                        // Remove children bottom-up
+                        while let Some(parent_id) = class.parent {
+                            let parent_class = hierarchy.mut_class(parent_id);
+                            parent_class.children.remove(class_id);
+
+                            if parent_class.children.is_empty() {
+                                // No children left, remove this class now too
+                                class = parent_class;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                },
 
                 Ok((_stream_id, quiche::h3::Event::Reset { .. })) => (),
 

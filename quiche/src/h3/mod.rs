@@ -1073,8 +1073,6 @@ pub struct Connection {
 
     local_goaway_id: Option<u64>,
     peer_goaway_id: Option<u64>,
-    
-    pub hierarchy: HLSHierarchy,
 }
 
 impl Connection {
@@ -1135,8 +1133,6 @@ impl Connection {
 
             local_goaway_id: None,
             peer_goaway_id: None,
-
-            hierarchy: HLSHierarchy::new(),
         })
     }
 
@@ -1301,11 +1297,6 @@ impl Connection {
             .urgency
             .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
             PRIORITY_URGENCY_OFFSET;
-
-        // Check whether the stream's priority is already reflected in the hierarchy.
-        // If not, modify the hierarchy.
-
-        println!("Hierarchy is {:?}", self.streams[&stream_id]);
 
         conn.stream_priority(stream_id, urgency, priority.0[0].incremental)?;
 

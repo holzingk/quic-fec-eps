@@ -10,10 +10,10 @@ pub struct HLSClass {
     pub(crate) id: u64,
 
     /// Parent class of the class.
-    parent: Option<u64>,
+    pub parent: Option<u64>,
 
     /// Set of children of the class.
-    children: HashSet<u64>,
+    pub children: HashSet<u64>,
 
     /// The class' weight (in promille).
     pub weight: u32,
@@ -29,7 +29,7 @@ pub struct HLSClass {
     fair_quota: Option<i64>,
 
     /// The stream id of this class. `None` for classes that are not leaves.
-    pub(crate) stream_id: Option<u64>,
+    pub stream_id: Option<u64>,
 
     /// Whether the class became idle during a round.
     idle: bool,
@@ -280,7 +280,8 @@ impl HLSHierarchy {
         }
     }
 
-    pub(crate) fn leaf_descendants(&self, node_id: u64) -> HashSet<u64> {
+    /// Returns the leaf descendants of a class.
+    pub fn leaf_descendants(&self, node_id: u64) -> HashSet<u64> {
         let mut descendants: HashSet<u64> = HashSet::new();
         let mut queue: HashSet<u64> =
             self.children(node_id).into_iter().collect();
@@ -303,7 +304,7 @@ impl HLSHierarchy {
         descendants
     }
 
-    pub(crate) fn ancestors(&self, node_id: u64) -> HashSet<u64> {
+    fn ancestors(&self, node_id: u64) -> HashSet<u64> {
         let mut ancestors: HashSet<u64> = HashSet::new();
         let mut current_id = node_id;
 
