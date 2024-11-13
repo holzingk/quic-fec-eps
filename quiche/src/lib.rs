@@ -4367,12 +4367,6 @@ impl Connection {
             // Link to the HLS implementation without BFS for reference
             // https://gitlab.lrz.de/netintum/teaching/tumi8-theses/ma-rocha/quiche/-/blob/hls-scheduler/quiche/src/lib.rs?ref_type=heads#L4369
             // Get the HLS scheduler.
-            let scheduler: &mut HLSScheduler = &mut self.hls_scheduler;
-
-            // There is no class in the hierarchy left to explore with BFS.
-            // Configure the scheduler again to start a new BFS round.
-
-            // ....
 
             while let Some(priority_key) = self.streams.peek_flushable() {
                 let stream_id = priority_key.id;

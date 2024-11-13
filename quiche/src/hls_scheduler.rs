@@ -365,21 +365,8 @@ impl HLSHierarchy {
 }
 
 impl Default for HLSHierarchy {
-    /// Sample hierarchy used for testing
+    /// A hierarchy consisting of the root node only.
     fn default() -> Self {
-        // let mut hierarchy = HLSHierarchy::new();
-        // let max_streams: u64 = 50;
-        // let root = hierarchy.root;
-        //
-        // // This default range is due to Quiche's tests using stream ids between 0-50.
-        // for sid in 0..max_streams {
-        //     let class = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
-        //     hierarchy.set_stream_id(class, sid);
-        //     hierarchy.capacity += 1500;
-        // }
-        //
-        // hierarchy
-
         let mut hierarchy = HLSHierarchy::new();
         hierarchy.insert(3, false, 1, 0, 0, 0, None);
         hierarchy
@@ -465,9 +452,6 @@ impl fmt::Debug for HLSHierarchy {
 
 /// The attributes of the HLS scheduler.
 pub struct HLSScheduler {
-    /// The BFS frontier
-    bfs_frontier: VecDeque<u64>,
-
     /// Set of active leaves.
     pub(crate) l_ac: HashSet<u64>,
 
@@ -494,7 +478,6 @@ impl HLSScheduler {
     /// Creates a new HLS scheduler.
     pub fn new(hierarchy: HLSHierarchy) -> HLSScheduler {
         HLSScheduler {
-            bfs_frontier: Default::default(),
             q: 0,
             hierarchy,
             i_ac: HashSet::new(),
@@ -898,19 +881,19 @@ impl HLSScheduler {
     /// Uses BFS to determine the set of active classes (internal and leaf classes)
     /// for the current scheduling round.
     pub(crate) fn backlogged_classes_from_hierarchy(&mut self) -> HashSet<u64> {
+        let mut bfs_frontier: VecDeque<u64> = VecDeque::new();
         let hierarchy = &self.hierarchy;
         let root = hierarchy.root;
 
-        // Let's reset the set of active classes at the start of a new round for now
         let mut l_ac_eps: HashSet<u64> = HashSet::new();
 
         // Start exploring from the root.
-        self.bfs_frontier.push_back(root);
+        bfs_frontier.push_back(root);
 
         // While the frontier is not empty, explore the hierarchy layer by layer.
-        while !self.bfs_frontier.is_empty() {
+        while !bfs_frontier.is_empty() {
             // Dequeue the first element from the frontier.
-            if let Some(node) = self.bfs_frontier.pop_front() {
+            if let Some(node) = bfs_frontier.pop_front() {
                 let hierarchy = &self.hierarchy;
                 let children = hierarchy.children(node);
 
@@ -948,7 +931,7 @@ impl HLSScheduler {
                             l_ac_eps.insert(id);
                         } else {
                             // Continue the search starting from this internal node.
-                            self.bfs_frontier.push_back(id);
+                            bfs_frontier.push_back(id);
                         }
 
                         // Break if the class is not incremental, preventing non-incremental classes

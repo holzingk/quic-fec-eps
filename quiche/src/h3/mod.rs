@@ -313,6 +313,7 @@ use qlog::events::EventData;
 use qlog::events::EventImportance;
 #[cfg(feature = "qlog")]
 use qlog::events::EventType;
+use crate::HLSScheduler;
 
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
@@ -1297,10 +1298,14 @@ impl Connection {
             .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
             PRIORITY_URGENCY_OFFSET;
 
+        // Check whether the stream's priority is already reflected in the hierarchy.
+        // If not, modify the hierarchy.
+
+        println!("Hierarchy is {:?}", self.streams[&stream_id]);
+
         conn.stream_priority(stream_id, urgency, priority.0[0].incremental)?;
 
         self.send_headers(conn, stream_id, headers, fin)?;
-
         Ok(())
     }
 
