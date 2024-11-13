@@ -170,7 +170,7 @@ impl SourceSymbols {
                 if largest_symbol_id > *last_sid =>
             {
                 // everything within the gap is missing
-                for missing_sid in (*last_sid + 1)..largest_symbol_id  {
+                for missing_sid in (*last_sid + 1)..=largest_symbol_id  {
                     self.missing_sids.insert(missing_sid);
                 }
             },
@@ -180,7 +180,9 @@ impl SourceSymbols {
     }
 
     fn drop_symbols_older_than(&mut self, lower_bound: u64) {
-        self.source_buffer.retain(|sid, _ss| *sid >= lower_bound);
+	//trace!("Source buffer was {:?}", self.source_buffer);
+        self.source_buffer.retain(|sid, _ss| !(*sid < lower_bound));
+	//trace!("Source buffer currently is {:?}", self.source_buffer);
     }
 
     fn count_missing(&self) -> usize {
@@ -189,6 +191,16 @@ impl SourceSymbols {
 
     fn get_symbols(&mut self) -> impl Iterator<Item = &mut SourceSymbol> {
         self.source_buffer.values_mut()
+    }
+
+    fn get_smallest_sid(&self) -> Option<u64> {
+	self.source_buffer.first_key_value()
+	    .map(|(k, _v)| k.to_owned())
+    }
+
+    fn get_largest_sid(&self) -> Option<u64> {
+	self.source_buffer.last_key_value()
+	    .map(|(k, _v)| k.to_owned())
     }
 
     fn get_missing_sids(&self) -> impl Iterator<Item = &u64> {
@@ -251,7 +263,8 @@ impl RepairSymbols {
 
     /// Returns the smallest source symbol that is still referenced after the GC
     fn collect_garbage(&mut self, smallest_missing_sid: u64) -> u64 {
-        // neues hashset anlegen: alle rids in dem unteren fenster
+	//trace!("Window before GC is {:?}", self.window);
+        // neues hashset anlegen: alle rids rausfinden die unterhalb der kleinsten vermissten sid liegen
         let mut below: HashSet<u64> = HashSet::new();
         // alle sids kleiner als gesuchte im fenster iterieren
         for (_sid, rids) in self.window.range(..smallest_missing_sid) {
@@ -259,14 +272,20 @@ impl RepairSymbols {
                 below.insert(*rid);
             }
         }
+	trace!("Below missing sid {smallest_missing_sid} are: {:?}", below);
 
-        // schnittmenge mit gesuchter SID bilden und rids
+        // rids, die noch für smallest missing sid benötigt werden von below abziehen
         let unneeded_rids = match self.window.get_mut(&smallest_missing_sid) {
-            None => HashSet::new(),
+            None => {
+		trace!("No rids are needed anymore");
+		below.clone()
+	    },
             Some(remaining_rids) => {
+		trace!("The following rids are still needed, e.g. for {smallest_missing_sid}: {:?}", remaining_rids);
                 below.difference(remaining_rids).cloned().collect()
             },
         };
+	trace!("The following rids are no longer needed and are removed: {:?}", unneeded_rids);
         for unneeded_rid in unneeded_rids {
             let rs = self.repair_buffer.remove(&unneeded_rid).unwrap();
             for (_sid, rids) in self
@@ -278,6 +297,7 @@ impl RepairSymbols {
         }
         // leere einträge löschen
         self.window.retain(|_sid, rids| !rids.is_empty());
+	//trace!("Window after GC is {:?}", self.window);
         self.first_sid_in_window()
     }
 
@@ -357,17 +377,8 @@ impl Decoder {
 
     /// Returns the next missing SID, but only if an ack should be sent, otherwise returns `None`
     pub fn get_ack(&mut self) -> u64 {
-        // let num_buffered = self.source_symbols.get_source_buffer_size();
-        // if self.safc.should_send_symbol_ack(
-        //     self.source_symbols.next_missing_sid(),
-        //     rtt,
-        //     num_buffered,
-        // ) {
         let ack_sid = self.source_symbols.next_missing_sid();
-        //self.safc.add_symbol_ack(ack_sid, num_buffered);
         ack_sid
-        // }
-        // None
     }
 
     /// Tries to decode something
@@ -377,12 +388,14 @@ impl Decoder {
             return ret;
         }
 
-        let smallest_sid_in_ss = self.source_symbols.get_symbols()
-	    .min_by_key(|ss| ss.get_source_symbol_id())
-	    .map(|ss| ss.get_source_symbol_id());
-	let largest_sid_in_ss = self.source_symbols.get_symbols()
-	    .max_by_key(|ss| ss.get_source_symbol_id())
-	    .map(|ss| ss.get_source_symbol_id());
+        let smallest_sid_in_ss = self.source_symbols.get_smallest_sid();
+	    // get_symbols()
+	    // .min_by_key(|ss| ss.get_source_symbol_id())
+	    // .map(|ss| ss.get_source_symbol_id());
+	let largest_sid_in_ss = self.source_symbols.get_largest_sid();
+	    // .get_symbols()
+	    // .max_by_key(|ss| ss.get_source_symbol_id())
+	    // .map(|ss| ss.get_source_symbol_id());
 
         let missing_sids: Vec<u64> =
             self.source_symbols.get_missing_sids().copied().collect();
@@ -392,16 +405,15 @@ impl Decoder {
             missing_sids
         );
 
+	trace!("Sid range in ss buffer is {:?}-{:?}", smallest_sid_in_ss, largest_sid_in_ss);
 	// could be that the first symbols are missing
 	let smallest_sid = cmp::min(
-	    missing_sids.iter().min().expect("there are missing sids at this point"),
-	    &smallest_sid_in_ss.unwrap_or(0))
-	    .to_owned();
+	    missing_sids.iter().min().expect("there are missing sids at this point").to_owned(),
+	    smallest_sid_in_ss.unwrap_or(0).to_owned());
 	//similar last sid could be missing
 	let largest_sid = cmp::max(
-	    missing_sids.iter().max().expect("idem"),
-	    &largest_sid_in_ss.unwrap_or(0))
-	    .to_owned();
+	    missing_sids.iter().max().expect("idem").to_owned(),
+	    largest_sid_in_ss.unwrap_or(0).to_owned());
 	
 	// foreach missing sid, collect all protecting RSs in a set
 	// we assume: youngest missing source symbols have fewest repair symbols
@@ -413,8 +425,9 @@ impl Decoder {
 		if rs.protecting(*missing_sid) {
 //		    let was_free = rids_used.insert(*rid);
 //		    if was_free {
-		    trace!("Adding {rid}, protecting {missing_sid}");
-		    rs_for_missing_sid[i].insert(*rid);
+		    if !rs_for_missing_sid[i].insert(*rid) {
+			trace!("Adding {rid}, protecting {missing_sid}");
+		    }
 //		    }
 		}
 	    }
@@ -456,9 +469,13 @@ impl Decoder {
             trace!("{} ss are available", num_source_symbols);
 	    
 	    for rid in rs_combination {
-		matrix.push(SymbolRow::from_rs(self.repair_symbols.get_ref(rid),
-					       smallest_sid,
-					       largest_sid));
+		let rs = self.repair_symbols.get_ref(rid);
+		trace!("Adding {rid} with smallest sid {} and largest sid {}. Smallest sid and largest sid for this iteration are {} - {}",
+		       rs.smallest_symbol_id, rs.largest_symbol_id,
+		       smallest_sid, largest_sid);
+		assert!(smallest_sid <= rs.smallest_symbol_id);
+		assert!(largest_sid >= rs.largest_symbol_id);
+		matrix.push(SymbolRow::from_rs(rs, smallest_sid, largest_sid));
 	    }
 	    
             // get to row-echelon form
@@ -688,6 +705,7 @@ impl Decoder {
         let smallest_needed = self
             .repair_symbols
             .collect_garbage(self.source_symbols.next_missing_sid());
+	trace!("Dropping source symbols smaller than {smallest_needed}");
         self.source_symbols.drop_symbols_older_than(smallest_needed);
     }
 

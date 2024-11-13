@@ -4400,7 +4400,7 @@ impl Connection {
 			len: len as u64,
 			data: rs.get_payload_aligned_as_ref()[..len].to_vec(),
 		    };
-		    if repair_frame.wire_len() <= left {
+		    if repair_frame.wire_len() < left && frames.len() < 2 {
 			trace!("{} Pushing repair frame to packet: smallest_sid {}, highest_sid {}, seed {}, len {}",
 			       self.trace_id,
 			       rs.get_smallest_symbol_id(),
