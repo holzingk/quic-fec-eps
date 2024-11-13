@@ -364,14 +364,6 @@ impl HLSHierarchy {
     }
 }
 
-impl Default for HLSHierarchy {
-    /// A hierarchy consisting of the root node only.
-    fn default() -> Self {
-        let mut hierarchy = HLSHierarchy::new();
-        hierarchy.insert(3, false, 1, 0, 0, 0, None);
-        hierarchy
-    }
-}
 impl fmt::Debug for HLSHierarchy {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         fn print_node(

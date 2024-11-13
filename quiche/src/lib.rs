@@ -1884,7 +1884,7 @@ impl Connection {
 
             dcid_seq_to_abandon: VecDeque::new(),
 
-            hls_scheduler: HLSScheduler::new(HLSHierarchy::default()),
+            hls_scheduler: HLSScheduler::new(HLSHierarchy::new()),
         };
 
         // Don't support multipath with zero-length CIDs.

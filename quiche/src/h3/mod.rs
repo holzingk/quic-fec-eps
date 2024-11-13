@@ -313,7 +313,7 @@ use qlog::events::EventData;
 use qlog::events::EventImportance;
 #[cfg(feature = "qlog")]
 use qlog::events::EventType;
-use crate::HLSScheduler;
+use crate::{HLSHierarchy, HLSScheduler};
 
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
@@ -1073,6 +1073,8 @@ pub struct Connection {
 
     local_goaway_id: Option<u64>,
     peer_goaway_id: Option<u64>,
+    
+    pub hierarchy: HLSHierarchy,
 }
 
 impl Connection {
@@ -1133,6 +1135,8 @@ impl Connection {
 
             local_goaway_id: None,
             peer_goaway_id: None,
+
+            hierarchy: HLSHierarchy::new(),
         })
     }
 
