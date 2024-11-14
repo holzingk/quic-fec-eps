@@ -669,6 +669,18 @@ pub struct Stream {
     /// Whether the stream can be flushed incrementally. Default is `true`.
     pub incremental: bool,
 
+    /// The class' weight (in promille).
+    pub weight: u32,
+
+    /// The class' burst loss tolerance.
+    pub burst_loss_tolerance: u32,
+
+    /// Tolerated waiting time for protection repair symbols.
+    pub repair_delay_tolerance: u32,
+
+    /// The class' protection ratio.
+    pub protection_ratio: u32,
+
     pub priority_key: Arc<StreamPriorityKey>,
 }
 
@@ -691,6 +703,10 @@ impl Stream {
             local,
             urgency: priority_key.urgency,
             incremental: priority_key.incremental,
+            weight: priority_key.weight,
+            burst_loss_tolerance: priority_key.burst_loss_tolerance,
+            repair_delay_tolerance: priority_key.repair_delay_tolerance,
+            protection_ratio: priority_key.protection_ratio,
             priority_key,
         }
     }
@@ -755,11 +771,16 @@ pub fn is_bidi(stream_id: u64) -> bool {
 pub struct StreamPriorityKey {
     pub urgency: u8,
     pub incremental: bool,
+    pub weight: u32,
+    pub burst_loss_tolerance: u32,
+    pub protection_ratio: u32,
+    pub repair_delay_tolerance: u32,
     pub id: u64,
 
     pub readable: RBTreeAtomicLink,
     pub writable: RBTreeAtomicLink,
     pub flushable: RBTreeAtomicLink,
+
 }
 
 impl Default for StreamPriorityKey {
@@ -767,6 +788,10 @@ impl Default for StreamPriorityKey {
         Self {
             urgency: DEFAULT_URGENCY,
             incremental: true,
+            weight: 1,
+            burst_loss_tolerance: 0,
+            protection_ratio: 0,
+            repair_delay_tolerance: 0,
             id: Default::default(),
             readable: Default::default(),
             writable: Default::default(),

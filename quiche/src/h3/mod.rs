@@ -313,7 +313,6 @@ use qlog::events::EventData;
 use qlog::events::EventImportance;
 #[cfg(feature = "qlog")]
 use qlog::events::EventType;
-use crate::{HLSHierarchy, HLSScheduler};
 
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
@@ -891,11 +890,10 @@ impl Priority {
 
     /// Creates a new priority, legacy constructor
     pub fn new(urgency: u8, incremental: bool) -> Self {
-	Self::new_hierarchical(
-	    vec!(PriorityValues::new(
-		urgency, incremental)))	
-    }
-
+        Self::new_hierarchical(
+            vec!(PriorityValues::new(
+            urgency, incremental)))
+        }
 }
 
 #[cfg(feature = "sfv")]
@@ -1260,10 +1258,11 @@ impl Connection {
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
         fin: bool,
     ) -> Result<()> {
-        let priority = Default::default();
+        // Needs to be mutable to clamp urgency.
+        let mut priority = Default::default();
 
         self.send_response_with_priority(
-            conn, stream_id, headers, &priority, fin,
+            conn, stream_id, headers, &mut priority, fin,
         )?;
 
         Ok(())
@@ -1285,7 +1284,7 @@ impl Connection {
     /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     pub fn send_response_with_priority<T: NameValue>(
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
-        priority: &Priority, fin: bool,
+        priority: &mut Priority, fin: bool,
     ) -> Result<()> {
         if !self.streams.contains_key(&stream_id) {
             return Err(Error::FrameUnexpected);
@@ -1298,7 +1297,9 @@ impl Connection {
             .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
             PRIORITY_URGENCY_OFFSET;
 
-        conn.stream_priority(stream_id, urgency, priority.0[0].incremental)?;
+        priority.0[0].urgency = urgency;
+
+        conn.stream_priority(stream_id, &priority)?;
 
         self.send_headers(conn, stream_id, headers, fin)?;
         Ok(())
@@ -1953,7 +1954,8 @@ impl Connection {
             stream::HTTP3_CONTROL_STREAM_TYPE_ID |
             stream::QPACK_ENCODER_STREAM_TYPE_ID |
             stream::QPACK_DECODER_STREAM_TYPE_ID => {
-                conn.stream_priority(stream_id, 0, false)?;
+                let mut priority = Priority::new(0, false);
+                conn.stream_priority(stream_id, &mut priority)?;
             },
 
             // TODO: Server push
@@ -1961,7 +1963,8 @@ impl Connection {
 
             // Anything else is a GREASE stream, so make it the least important.
             _ => {
-                conn.stream_priority(stream_id, 255, false)?;
+                let priority = Priority::new(255, false);
+                conn.stream_priority(stream_id, &priority)?;
             },
         }
 

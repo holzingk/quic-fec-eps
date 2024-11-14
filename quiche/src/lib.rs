@@ -416,6 +416,7 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 
 use smallvec::SmallVec;
+use crate::h3::Priority;
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -4367,7 +4368,7 @@ impl Connection {
             // Link to the HLS implementation without BFS for reference
             // https://gitlab.lrz.de/netintum/teaching/tumi8-theses/ma-rocha/quiche/-/blob/hls-scheduler/quiche/src/lib.rs?ref_type=heads#L4369
             // Get the HLS scheduler.
-            let scheduler: &mut HLSScheduler = &mut self.hls_scheduler;
+            let _scheduler: &mut HLSScheduler = &mut self.hls_scheduler;
             
             while let Some(priority_key) = self.streams.peek_flushable() {
                 let stream_id = priority_key.id;
@@ -5057,7 +5058,7 @@ impl Connection {
     /// The target stream is created if it did not exist before calling this
     /// method.
     pub fn stream_priority(
-        &mut self, stream_id: u64, urgency: u8, incremental: bool,
+        &mut self, stream_id: u64, priority: &Priority
     ) -> Result<()> {
         // Get existing stream or create a new one, but if the stream
         // has already been closed and collected, ignore the prioritization.
@@ -5069,16 +5070,31 @@ impl Connection {
             Err(e) => return Err(e),
         };
 
-        if stream.urgency == urgency && stream.incremental == incremental {
+        if  stream.urgency == priority.0[0].urgency &&
+            stream.incremental == priority.0[0].incremental &&
+            stream.weight == priority.0[0].weight &&
+            stream.burst_loss_tolerance == priority.0[0].burst_loss_tolerance &&
+            stream.protection_ratio == priority.0[0].protection_ratio &&
+            stream.repair_delay_tolerance == priority.0[0].repair_delay_tolerance
+        {
             return Ok(());
         }
 
-        stream.urgency = urgency;
-        stream.incremental = incremental;
+        // Modify the stream's urgency, if necessary.
+        stream.urgency = priority.0[0].urgency;
+        stream.incremental = priority.0[0].incremental;
+        stream.weight = priority.0[0].weight;
+        stream.burst_loss_tolerance = priority.0[0].burst_loss_tolerance;
+        stream.protection_ratio = priority.0[0].protection_ratio;
+        stream.repair_delay_tolerance = priority.0[0].repair_delay_tolerance;
 
         let new_priority_key = Arc::new(StreamPriorityKey {
             urgency: stream.urgency,
             incremental: stream.incremental,
+            weight: stream.weight,
+            burst_loss_tolerance: stream.burst_loss_tolerance,
+            protection_ratio: stream.protection_ratio,
+            repair_delay_tolerance: stream.repair_delay_tolerance,
             id: stream_id,
             ..Default::default()
         });
@@ -5088,6 +5104,117 @@ impl Connection {
 
         self.streams
             .update_priority(&old_priority_key, &new_priority_key);
+
+        // Now, we modify the HLS hierarchy accordingly.
+
+        // // Determine minimum path MTU
+        // let mtu: usize = conn
+        //     .path_stats()
+        //     .filter_map(|p| Option::from(p.pmtu))
+        //     .min()
+        //     .unwrap_or(1500);
+        //
+        // trace!("Minimum MTU is {:?}", mtu);
+        //
+        // // Append the stream to the HLS hierarchy
+        // let hierarchy = &mut conn.hls_scheduler.hierarchy;
+        //
+        // // The first (and default) parent is the root; start with it.
+        // let mut current_parent = hierarchy.root;
+        //
+        // // Reverse priority values (pv) to append exp_p path parameters top-down.
+        // for pv in priority.0.iter().rev() {
+        //     if let Some(id) = pv.id.clone() {
+        //         if hierarchy.eps_id_to_hls_id.contains_key(&id) {
+        //             // Class has already been added.
+        //             // Use it as the parent in the next iteration.
+        //             current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
+        //
+        //             trace!("Updating values for existing class {:?} (HLS id={:?})",
+        //                             id, current_parent);
+        //
+        //             // Overwrite its pre-existing values.
+        //             let internal_class = hierarchy.mut_class(current_parent);
+        //
+        //             internal_class.weight = pv.weight;
+        //             internal_class.urgency = pv.urgency;
+        //             internal_class.incremental = pv.incremental;
+        //             internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
+        //             internal_class.protection_ratio = pv.protection_ratio;
+        //             internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
+        //
+        //             continue
+        //         }
+        //     }
+        //
+        //     // Insert the path element into the hierarchy and use it as the next parent.
+        //     current_parent = hierarchy.insert(
+        //         pv.urgency,
+        //         pv.incremental,
+        //         pv.weight,
+        //         pv.burst_loss_tolerance,
+        //         pv.protection_ratio,
+        //         pv.repair_delay_tolerance,
+        //         Some(current_parent)
+        //     );
+        //
+        //     // Leaves don't have an eps_p ID.
+        //     // For new internal EPS IDs, store the generated class ID
+        //     if let Some(id) = pv.id.clone() {
+        //         hierarchy.eps_id_to_hls_id.insert(id, current_parent);
+        //     }
+        //
+        //     // Modify the root's capacity
+        //     hierarchy.capacity += mtu as u64;
+        // }
+        //
+        // // Convert weights into global guarantees accounting for the new capacity
+        // hierarchy.generate_guarantees();
+        // trace!("{:?}", hierarchy);
+
+        // let path_mtu = self
+        //             .path_stats()
+        //             .filter_map(|p| Option::from(p.pmtu))
+        //             .min()
+        //             .unwrap_or(1500) as u64;
+        //         // This is done so that we have a flat hierarchy by default in Quiche's tests,
+        //         // which should be backwards-compatible.
+        //         if let Ok(ref stream) = result {
+        //             let stream_id = stream.priority_key.id;
+        //
+        //             let hierarchy = &mut self.hls_scheduler.hierarchy;
+        //             let root = hierarchy.root;
+        //
+        //             let leaves = hierarchy.leaf_descendants(root);
+        //             let mut class_id: Option<u64> = None;
+        //
+        //             for leaf in leaves {
+        //                 let class = hierarchy.class(leaf);
+        //
+        //                 if let Some(sid) = class.stream_id {
+        //                     if sid == stream_id {
+        //                         class_id = Option::from(class.id);
+        //                         break
+        //                     }
+        //                 }
+        //             }
+        //
+        //             // Don't insert the stream if it already exists in the hierarchy
+        //             if class_id == None {
+        //                 let new_stream = hierarchy.insert(
+        //                     stream.urgency,
+        //                     stream.incremental,
+        //                     1,
+        //                     0,
+        //                     0,
+        //                     0,
+        //                     Some(root));
+        //
+        //                 // Set the stream ID
+        //                 hierarchy.mut_class(new_stream).stream_id = Some(stream_id);
+        //                 hierarchy.capacity += path_mtu;
+        //             }
+        //         }
 
         Ok(())
     }
@@ -13562,37 +13689,43 @@ mod tests {
         //  * Stream 0 is on its own.
 
         pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
+        let mut priority = Priority::new(255, true);
+        assert_eq!(pipe.server.stream_priority(0, &mut priority), Ok(()));
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
 
         pipe.server.stream_recv(12, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(12, 42, true), Ok(()));
+        let mut priority = Priority::new(42, true);
+        assert_eq!(pipe.server.stream_priority(12, &mut priority), Ok(()));
         pipe.server.stream_send(12, &out, false).unwrap();
         pipe.server.stream_send(12, &out, false).unwrap();
         pipe.server.stream_send(12, &out, false).unwrap();
 
         pipe.server.stream_recv(16, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(16, 10, false), Ok(()));
+        let mut priority = Priority::new(10, false);
+        assert_eq!(pipe.server.stream_priority(16, &mut priority), Ok(()));
         pipe.server.stream_send(16, &out, false).unwrap();
         pipe.server.stream_send(16, &out, false).unwrap();
         pipe.server.stream_send(16, &out, false).unwrap();
 
         pipe.server.stream_recv(4, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(4, 42, true), Ok(()));
+        let mut priority = Priority::new(42, true);
+        assert_eq!(pipe.server.stream_priority(4, &mut priority), Ok(()));
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();
 
         pipe.server.stream_recv(8, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(8, 10, false), Ok(()));
+        let mut priority = Priority::new(10, false);
+        assert_eq!(pipe.server.stream_priority(8, &mut priority), Ok(()));
         pipe.server.stream_send(8, &out, false).unwrap();
         pipe.server.stream_send(8, &out, false).unwrap();
         pipe.server.stream_send(8, &out, false).unwrap();
 
         pipe.server.stream_recv(20, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(20, 42, false), Ok(()));
+        let mut priority = Priority::new(42, false);
+        assert_eq!(pipe.server.stream_priority(20, &mut priority), Ok(()));
         pipe.server.stream_send(20, &out, false).unwrap();
         pipe.server.stream_send(20, &out, false).unwrap();
         pipe.server.stream_send(20, &out, false).unwrap();
@@ -13771,23 +13904,28 @@ mod tests {
         let mut b = [0; 1];
 
         pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
+        let mut priority = Priority::new(255, true);
+        assert_eq!(pipe.server.stream_priority(0, &mut priority), Ok(()));
         pipe.server.stream_send(0, b"b", false).unwrap();
 
         pipe.server.stream_recv(12, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(12, 42, true), Ok(()));
+        let mut priority = Priority::new(42, true);
+        assert_eq!(pipe.server.stream_priority(12, &mut priority), Ok(()));
         pipe.server.stream_send(12, b"b", false).unwrap();
 
         pipe.server.stream_recv(8, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(8, 10, true), Ok(()));
+        let mut priority = Priority::new(10, true);
+        assert_eq!(pipe.server.stream_priority(8, &mut priority), Ok(()));
         pipe.server.stream_send(8, b"b", false).unwrap();
 
         pipe.server.stream_recv(4, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(4, 42, true), Ok(()));
+        let mut priority = Priority::new(42, true);
+        assert_eq!(pipe.server.stream_priority(4, &mut priority), Ok(()));
         pipe.server.stream_send(4, b"b", false).unwrap();
 
         // Stream 0 is re-prioritized!!!
-        assert_eq!(pipe.server.stream_priority(0, 20, true), Ok(()));
+        let mut priority = Priority::new(20, true);
+        assert_eq!(pipe.server.stream_priority(0, &mut priority), Ok(()));
 
         // First is stream 8.
         let (len, _) = pipe.server.send(&mut buf).unwrap();
@@ -13894,12 +14032,14 @@ mod tests {
         // of the order that the application writes things in.
 
         pipe.server.stream_recv(0, &mut b).unwrap();
-        assert_eq!(pipe.server.stream_priority(0, 255, true), Ok(()));
+        let mut priority = Priority::new(255, true);
+        assert_eq!(pipe.server.stream_priority(0, &mut priority), Ok(()));
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
 
-        assert_eq!(pipe.server.stream_priority(4, 255, true), Ok(()));
+        let mut priority = Priority::new(255, true);
+        assert_eq!(pipe.server.stream_priority(4, &mut priority), Ok(()));
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();

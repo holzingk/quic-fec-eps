@@ -613,7 +613,7 @@ impl HLSScheduler {
         // Generate guarantees for the current hierarchy
         self.hierarchy.generate_guarantees();
 
-        let l_ac_eps = self.backlogged_classes_from_hierarchy();
+        let _l_ac_eps = self.backlogged_classes_from_hierarchy();
         let root_id = self.hierarchy.root;
 
         // Active classes are determined at the start of every round.
