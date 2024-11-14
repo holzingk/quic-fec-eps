@@ -4929,7 +4929,7 @@ impl Connection {
         let cap = self.tx_cap;
 
         // Get existing stream or create a new one.
-        let stream = self.get_or_create_stream(stream_id, true)?;
+        let stream = self.get_or_create_stream(stream_id, true, &mut Priority::default())?;
 
         #[cfg(feature = "qlog")]
         let offset = stream.send.off_back();
@@ -5062,7 +5062,7 @@ impl Connection {
     ) -> Result<()> {
         // Get existing stream or create a new one, but if the stream
         // has already been closed and collected, ignore the prioritization.
-        let stream = match self.get_or_create_stream(stream_id, true) {
+        let stream = match self.get_or_create_stream(stream_id, true, &mut Priority::default()) {
             Ok(v) => v,
 
             Err(Error::Done) => return Ok(()),
@@ -5104,70 +5104,6 @@ impl Connection {
 
         self.streams
             .update_priority(&old_priority_key, &new_priority_key);
-
-        // Now, we modify the HLS hierarchy accordingly.
-
-        // Determine minimum path MTU
-        let mtu: usize = self
-            .path_stats()
-            .filter_map(|p| Option::from(p.pmtu))
-            .min()
-            .unwrap_or(1500);
-
-        // Append the stream to the HLS hierarchy
-        let hierarchy = &mut self.hls_scheduler.hierarchy;
-
-        // The first (and default) parent is the root; start with it.
-        let mut current_parent = hierarchy.root;
-
-        // Reverse priority values (pv) to append exp_p path parameters top-down.
-        for pv in priority.0.iter().rev() {
-            if let Some(id) = pv.id.clone() {
-                if hierarchy.eps_id_to_hls_id.contains_key(&id) {
-                    // Class has already been added.
-                    // Use it as the parent in the next iteration.
-                    current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
-
-                    trace!("Updating values for existing class {:?} (HLS id={:?})",
-                                    id, current_parent);
-
-                    // Overwrite its pre-existing values.
-                    let internal_class = hierarchy.mut_class(current_parent);
-
-                    internal_class.weight = pv.weight;
-                    internal_class.urgency = pv.urgency;
-                    internal_class.incremental = pv.incremental;
-                    internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
-                    internal_class.protection_ratio = pv.protection_ratio;
-                    internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
-
-                    continue
-                }
-            }
-
-            // Insert the path element into the hierarchy and use it as the next parent.
-            current_parent = hierarchy.insert(
-                pv.urgency,
-                pv.incremental,
-                pv.weight,
-                pv.burst_loss_tolerance,
-                pv.protection_ratio,
-                pv.repair_delay_tolerance,
-                Some(current_parent)
-            );
-
-            // Leaves don't have an eps_p ID.
-            // For new internal EPS IDs, store the generated class ID
-            if let Some(id) = pv.id.clone() {
-                hierarchy.eps_id_to_hls_id.insert(id, current_parent);
-            }
-
-            // Modify the root's capacity
-            hierarchy.capacity += mtu as u64;
-        }
-
-        // Convert weights into global guarantees accounting for the new capacity
-        hierarchy.generate_guarantees();
 
         Ok(())
     }
@@ -7123,15 +7059,102 @@ impl Connection {
     /// Returns the mutable stream with the given ID if it exists, or creates
     /// a new one otherwise.
     fn get_or_create_stream(
-        &mut self, id: u64, local: bool,
+        &mut self, id: u64, local: bool, priority: &mut Priority,
     ) -> Result<&mut stream::Stream> {
-        self.streams.get_or_create(
+        // Determine minimum path MTU
+        let mtu: usize = self
+            .path_stats()
+            .filter_map(|p| Option::from(p.pmtu))
+            .min()
+            .unwrap_or(1500);
+
+        let result = self.streams.get_or_create(
             id,
             &self.local_transport_params,
             &self.peer_transport_params,
             local,
             self.is_server,
-        )
+        );
+
+        // Now, we modify the HLS hierarchy accordingly.
+        if let Ok(_) = result {
+            // Append the stream to the HLS hierarchy
+            let hierarchy = &mut self.hls_scheduler.hierarchy;
+
+            // Ensure the stream ID we want to add has not yet been added.
+            let root = hierarchy.root;
+
+            let leaves = hierarchy.leaf_descendants(root);
+
+            for leaf in leaves {
+                let class = hierarchy.class(leaf).stream_id;
+
+                if let Some(sid) = class {
+                    if sid == id {
+                        // Stream has already been added to the hierarchy.
+                        return result
+                    }
+                }
+            }
+
+            // The first (and default) parent is the root; start with it.
+            // The class added last is the leaf.
+            let mut current_parent = hierarchy.root;
+
+            // Reverse priority values (pv) to append exp_p path parameters top-down.
+            for pv in priority.0.iter().rev() {
+                if let Some(id) = pv.id.clone() {
+                    if hierarchy.eps_id_to_hls_id.contains_key(&id) {
+                        // Class has already been added.
+                        // Use it as the parent in the next iteration.
+                        current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
+
+                        trace!("Updating values for existing class {:?} (HLS id={:?})",
+                                    id, current_parent);
+
+                        // Overwrite its pre-existing values.
+                        let internal_class = hierarchy.mut_class(current_parent);
+
+                        internal_class.weight = pv.weight;
+                        internal_class.urgency = pv.urgency;
+                        internal_class.incremental = pv.incremental;
+                        internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
+                        internal_class.protection_ratio = pv.protection_ratio;
+                        internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
+
+                        continue
+                    }
+                }
+
+                // Insert the path element into the hierarchy and use it as the next parent.
+                current_parent = hierarchy.insert(
+                    pv.urgency,
+                    pv.incremental,
+                    pv.weight,
+                    pv.burst_loss_tolerance,
+                    pv.protection_ratio,
+                    pv.repair_delay_tolerance,
+                    Some(current_parent)
+                );
+
+                // Leaves don't have an eps_p ID.
+                // For new internal EPS IDs, store the generated class ID
+                if let Some(id) = pv.id.clone() {
+                    hierarchy.eps_id_to_hls_id.insert(id, current_parent);
+                }
+
+                // Modify the root's capacity
+                hierarchy.capacity += mtu as u64;
+            }
+
+            // Convert weights into global guarantees accounting for the new capacity
+            hierarchy.generate_guarantees();
+
+            // Add the stream ID to the node.
+            hierarchy.mut_class(current_parent).stream_id = Some(id);
+        }
+
+        result
     }
 
     /// Processes an incoming frame.
@@ -7245,7 +7268,7 @@ impl Connection {
                 // Note that it makes it impossible to check if the frame is
                 // illegal, since we have no state, but since we ignore the
                 // frame, it should be fine.
-                let stream = match self.get_or_create_stream(stream_id, false) {
+                let stream = match self.get_or_create_stream(stream_id, false, &mut Priority::default()) {
                     Ok(v) => v,
 
                     Err(Error::Done) => return Ok(()),
@@ -7291,7 +7314,7 @@ impl Connection {
                 // Note that it makes it impossible to check if the frame is
                 // illegal, since we have no state, but since we ignore the
                 // frame, it should be fine.
-                let stream = match self.get_or_create_stream(stream_id, false) {
+                let stream = match self.get_or_create_stream(stream_id, false, &mut Priority::default()) {
                     Ok(v) => v,
 
                     Err(Error::Done) => return Ok(()),
@@ -7375,7 +7398,7 @@ impl Connection {
                 // Note that it makes it impossible to check if the frame is
                 // illegal, since we have no state, but since we ignore the
                 // frame, it should be fine.
-                let stream = match self.get_or_create_stream(stream_id, false) {
+                let stream = match self.get_or_create_stream(stream_id, false, &mut Priority::default()) {
                     Ok(v) => v,
 
                     Err(Error::Done) => return Ok(()),
@@ -7441,7 +7464,7 @@ impl Connection {
                 // Note that it makes it impossible to check if the frame is
                 // illegal, since we have no state, but since we ignore the
                 // frame, it should be fine.
-                let stream = match self.get_or_create_stream(stream_id, false) {
+                let stream = match self.get_or_create_stream(stream_id, false, &mut Priority::default()) {
                     Ok(v) => v,
 
                     Err(Error::Done) => return Ok(()),
