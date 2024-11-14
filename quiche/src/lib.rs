@@ -7045,61 +7045,13 @@ impl Connection {
     fn get_or_create_stream(
         &mut self, id: u64, local: bool,
     ) -> Result<&mut stream::Stream> {
-        let path_mtu = self
-            .path_stats()
-            .filter_map(|p| Option::from(p.pmtu))
-            .min()
-            .unwrap_or(1500) as u64;
-
-        let result = self.streams.get_or_create(
+        self.streams.get_or_create(
             id,
             &self.local_transport_params,
             &self.peer_transport_params,
             local,
             self.is_server,
-        );
-
-        // Append the new stream to the root if it doesn't exist.
-        // This is done so that we have a flat hierarchy by default in Quiche's tests,
-        // which should be backwards-compatible.
-        if let Ok(ref stream) = result {
-            let stream_id = stream.priority_key.id;
-
-            let hierarchy = &mut self.hls_scheduler.hierarchy;
-            let root = hierarchy.root;
-
-            let leaves = hierarchy.leaf_descendants(root);
-            let mut class_id: Option<u64> = None;
-
-            for leaf in leaves {
-                let class = hierarchy.class(leaf);
-
-                if let Some(sid) = class.stream_id {
-                    if sid == stream_id {
-                        class_id = Option::from(class.id);
-                        break
-                    }
-                }
-            }
-            
-            // Don't insert the stream if it already exists in the hierarchy
-            if class_id == None {
-                let new_stream = hierarchy.insert(
-                    stream.urgency,
-                    stream.incremental,
-                    1,
-                    0,
-                    0,
-                    0,
-                    Some(root));
-
-                // Set the stream ID
-                hierarchy.mut_class(new_stream).stream_id = Some(stream_id);
-                hierarchy.capacity += path_mtu;
-            }
-        }
-
-        result
+        )
     }
 
     /// Processes an incoming frame.
