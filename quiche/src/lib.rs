@@ -5107,114 +5107,67 @@ impl Connection {
 
         // Now, we modify the HLS hierarchy accordingly.
 
-        // // Determine minimum path MTU
-        // let mtu: usize = conn
-        //     .path_stats()
-        //     .filter_map(|p| Option::from(p.pmtu))
-        //     .min()
-        //     .unwrap_or(1500);
-        //
-        // trace!("Minimum MTU is {:?}", mtu);
-        //
-        // // Append the stream to the HLS hierarchy
-        // let hierarchy = &mut conn.hls_scheduler.hierarchy;
-        //
-        // // The first (and default) parent is the root; start with it.
-        // let mut current_parent = hierarchy.root;
-        //
-        // // Reverse priority values (pv) to append exp_p path parameters top-down.
-        // for pv in priority.0.iter().rev() {
-        //     if let Some(id) = pv.id.clone() {
-        //         if hierarchy.eps_id_to_hls_id.contains_key(&id) {
-        //             // Class has already been added.
-        //             // Use it as the parent in the next iteration.
-        //             current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
-        //
-        //             trace!("Updating values for existing class {:?} (HLS id={:?})",
-        //                             id, current_parent);
-        //
-        //             // Overwrite its pre-existing values.
-        //             let internal_class = hierarchy.mut_class(current_parent);
-        //
-        //             internal_class.weight = pv.weight;
-        //             internal_class.urgency = pv.urgency;
-        //             internal_class.incremental = pv.incremental;
-        //             internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
-        //             internal_class.protection_ratio = pv.protection_ratio;
-        //             internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
-        //
-        //             continue
-        //         }
-        //     }
-        //
-        //     // Insert the path element into the hierarchy and use it as the next parent.
-        //     current_parent = hierarchy.insert(
-        //         pv.urgency,
-        //         pv.incremental,
-        //         pv.weight,
-        //         pv.burst_loss_tolerance,
-        //         pv.protection_ratio,
-        //         pv.repair_delay_tolerance,
-        //         Some(current_parent)
-        //     );
-        //
-        //     // Leaves don't have an eps_p ID.
-        //     // For new internal EPS IDs, store the generated class ID
-        //     if let Some(id) = pv.id.clone() {
-        //         hierarchy.eps_id_to_hls_id.insert(id, current_parent);
-        //     }
-        //
-        //     // Modify the root's capacity
-        //     hierarchy.capacity += mtu as u64;
-        // }
-        //
-        // // Convert weights into global guarantees accounting for the new capacity
-        // hierarchy.generate_guarantees();
-        // trace!("{:?}", hierarchy);
+        // Determine minimum path MTU
+        let mtu: usize = self
+            .path_stats()
+            .filter_map(|p| Option::from(p.pmtu))
+            .min()
+            .unwrap_or(1500);
 
-        // let path_mtu = self
-        //             .path_stats()
-        //             .filter_map(|p| Option::from(p.pmtu))
-        //             .min()
-        //             .unwrap_or(1500) as u64;
-        //         // This is done so that we have a flat hierarchy by default in Quiche's tests,
-        //         // which should be backwards-compatible.
-        //         if let Ok(ref stream) = result {
-        //             let stream_id = stream.priority_key.id;
-        //
-        //             let hierarchy = &mut self.hls_scheduler.hierarchy;
-        //             let root = hierarchy.root;
-        //
-        //             let leaves = hierarchy.leaf_descendants(root);
-        //             let mut class_id: Option<u64> = None;
-        //
-        //             for leaf in leaves {
-        //                 let class = hierarchy.class(leaf);
-        //
-        //                 if let Some(sid) = class.stream_id {
-        //                     if sid == stream_id {
-        //                         class_id = Option::from(class.id);
-        //                         break
-        //                     }
-        //                 }
-        //             }
-        //
-        //             // Don't insert the stream if it already exists in the hierarchy
-        //             if class_id == None {
-        //                 let new_stream = hierarchy.insert(
-        //                     stream.urgency,
-        //                     stream.incremental,
-        //                     1,
-        //                     0,
-        //                     0,
-        //                     0,
-        //                     Some(root));
-        //
-        //                 // Set the stream ID
-        //                 hierarchy.mut_class(new_stream).stream_id = Some(stream_id);
-        //                 hierarchy.capacity += path_mtu;
-        //             }
-        //         }
+        // Append the stream to the HLS hierarchy
+        let hierarchy = &mut self.hls_scheduler.hierarchy;
+
+        // The first (and default) parent is the root; start with it.
+        let mut current_parent = hierarchy.root;
+
+        // Reverse priority values (pv) to append exp_p path parameters top-down.
+        for pv in priority.0.iter().rev() {
+            if let Some(id) = pv.id.clone() {
+                if hierarchy.eps_id_to_hls_id.contains_key(&id) {
+                    // Class has already been added.
+                    // Use it as the parent in the next iteration.
+                    current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
+
+                    trace!("Updating values for existing class {:?} (HLS id={:?})",
+                                    id, current_parent);
+
+                    // Overwrite its pre-existing values.
+                    let internal_class = hierarchy.mut_class(current_parent);
+
+                    internal_class.weight = pv.weight;
+                    internal_class.urgency = pv.urgency;
+                    internal_class.incremental = pv.incremental;
+                    internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
+                    internal_class.protection_ratio = pv.protection_ratio;
+                    internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
+
+                    continue
+                }
+            }
+
+            // Insert the path element into the hierarchy and use it as the next parent.
+            current_parent = hierarchy.insert(
+                pv.urgency,
+                pv.incremental,
+                pv.weight,
+                pv.burst_loss_tolerance,
+                pv.protection_ratio,
+                pv.repair_delay_tolerance,
+                Some(current_parent)
+            );
+
+            // Leaves don't have an eps_p ID.
+            // For new internal EPS IDs, store the generated class ID
+            if let Some(id) = pv.id.clone() {
+                hierarchy.eps_id_to_hls_id.insert(id, current_parent);
+            }
+
+            // Modify the root's capacity
+            hierarchy.capacity += mtu as u64;
+        }
+
+        // Convert weights into global guarantees accounting for the new capacity
+        hierarchy.generate_guarantees();
 
         Ok(())
     }

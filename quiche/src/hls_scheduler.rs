@@ -610,9 +610,6 @@ impl HLSScheduler {
     /// Prepares the round-robin scheduler for a new main round.
     /// `backlogged_streams`: Vector of flushable stream IDs
     pub(crate) fn init_round(&mut self, backlogged_streams: Vec<u64>) {
-        // Generate guarantees for the current hierarchy
-        self.hierarchy.generate_guarantees();
-
         let _l_ac_eps = self.backlogged_classes_from_hierarchy();
         let root_id = self.hierarchy.root;
 
