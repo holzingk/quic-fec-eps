@@ -95,17 +95,15 @@ impl SourceSymbols {
     }
 
     fn add(&mut self, source_symbol: SourceSymbol) {
-        if source_symbol.get_source_symbol_id() > self.upper_bound {
-            self.upper_bound = source_symbol.get_source_symbol_id();
-        }
         // check if it's the next expected one
         if match self.source_buffer.last_key_value() {
             // empty
             None => {
-		trace!("First source symbol is {}, treating smaller SIDs as missing",
-		       source_symbol.source_symbol_id);
-                for missing_sid in 0..source_symbol.source_symbol_id {
-                    self.missing_sids.insert(missing_sid);
+                for missing_sid in self.upper_bound..source_symbol.source_symbol_id {
+		    trace!("Gap between current upper bound {} and source symbol id {}, treating {missing_sid} SID as missing",
+			   self.upper_bound,
+			   source_symbol.source_symbol_id);
+		    self.missing_sids.insert(missing_sid);
                 }
                 true
             },
@@ -148,13 +146,17 @@ impl SourceSymbols {
             },
             // normal
             Some(_) => true,
-        } {
-	    // in any case, it's not longer missing
-	    let _res = self.missing_sids.remove(&source_symbol.source_symbol_id);
-            self.source_buffer
-                .insert(source_symbol.source_symbol_id, source_symbol);
-        }
-    }
+            } {
+		if source_symbol.get_source_symbol_id() > self.upper_bound {
+		    self.upper_bound = source_symbol.get_source_symbol_id();
+		    trace!("Setting upper bound to {}", self.upper_bound);
+		}
+		// in any case, it's not longer missing
+		let _res = self.missing_sids.remove(&source_symbol.source_symbol_id);
+		self.source_buffer
+                    .insert(source_symbol.source_symbol_id, source_symbol);
+            }
+	}
 
     fn inform_rs_largest_symbol_id(&mut self, largest_symbol_id: u64) {
 	// check if it's the next expected one
@@ -176,12 +178,17 @@ impl SourceSymbols {
             },
 	    Some(_) => {}
 	};
+	// if largest_symbol_id > self.upper_bound {
+        //     self.upper_bound = largest_symbol_id;
+	//     trace!("Setting upper bound to {}, due to rs", self.upper_bound);
+        // }
+
 	
     }
 
     fn drop_symbols_older_than(&mut self, lower_bound: u64) {
 	//trace!("Source buffer was {:?}", self.source_buffer);
-        self.source_buffer.retain(|sid, _ss| !(*sid < lower_bound));
+        self.source_buffer.retain(|sid, _ss| *sid >= lower_bound);
 	//trace!("Source buffer currently is {:?}", self.source_buffer);
     }
 
@@ -211,14 +218,16 @@ impl SourceSymbols {
         self.missing_sids
             .first()
             .cloned()
-            .unwrap_or(self.get_sid_upper_bound() + 1)
+            .unwrap_or_else(|| self.get_sid_upper_bound() + 1)
     }
 
-    fn successfully_restored(&mut self) {
+    fn successfully_restored(&mut self, highest_reconstructed: u64) {
         self.missing_sids.clear();
+	self.upper_bound = highest_reconstructed;
     }
 
     fn get_sid_upper_bound(&self) -> u64 {
+	trace!("Using sid upper bound");
         self.upper_bound
     }
 
@@ -352,7 +361,7 @@ impl Decoder {
     pub fn add_source_symbol(
         &mut self, source_symbol_id: u64, src: &[u8],
     ) -> Result<(), FecError> {
-	trace!("Received source  symbol {source_symbol_id}");
+	trace!("Received source symbol {source_symbol_id}");
         let ss = SourceSymbol::new(source_symbol_id, src, &self.config)?;
         self.source_symbols.add(ss);
         Ok(())
@@ -375,7 +384,7 @@ impl Decoder {
         Ok(())
     }
 
-    /// Returns the next missing SID, but only if an ack should be sent, otherwise returns `None`
+    /// Returns the next missing SID
     pub fn get_ack(&mut self) -> u64 {
         let ack_sid = self.source_symbols.next_missing_sid();
         ack_sid
@@ -690,10 +699,11 @@ impl Decoder {
                     [*missing_sid as usize - smallest_sid as usize]
                     .get_payload_as_ref()
                     .to_vec();
+		self.add_source_symbol(*missing_sid, &new.as_slice()).unwrap();
 		ret.push(new);
             }
             // inform source symbols that something is no longer missing
-            self.source_symbols.successfully_restored();
+            self.source_symbols.successfully_restored(largest_sid);
 	    break;
 	}
 	ret
@@ -702,10 +712,11 @@ impl Decoder {
     /// cleans up repair symbols and source symbols that cannot be used anymore to return SIDs >= next symbol id
     /// todo: noop if no substantial change occurred
     fn collect_garbage(&mut self) {
+	let ss_next_missing = self.source_symbols.next_missing_sid();
         let smallest_needed = self
             .repair_symbols
-            .collect_garbage(self.source_symbols.next_missing_sid());
-	trace!("Dropping source symbols smaller than {smallest_needed}");
+            .collect_garbage(ss_next_missing);
+	trace!("Dropping source symbols smaller than {smallest_needed}, next_missing ss is {ss_next_missing}");
         self.source_symbols.drop_symbols_older_than(smallest_needed);
     }
 

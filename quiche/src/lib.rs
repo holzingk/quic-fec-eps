@@ -4546,10 +4546,12 @@ impl Connection {
 
 		let mut next_sid = None;
 		if stream.fec {
-		    self.fec.entry(stream_id).or_insert(
-			Tetrys::new(fec_payload_length)
-			    .unwrap());
-		    next_sid = Some(self.fec.get_mut(&stream_id).unwrap().encoder.get_next_sid());
+		    next_sid = Some(self.fec.entry(stream_id)
+				    .or_insert_with(||
+						    Tetrys::new(fec_payload_length)
+						    .unwrap())
+				    .encoder.get_next_sid());
+			//next_sid = Some(self.fec.get_mut(&stream_id).unwrap().encoder.get_next_sid());
 		}
 		
 		// In case of fec enabled stream, encode the stream frame inside source symbol frame
@@ -5325,12 +5327,16 @@ impl Connection {
 
 	if stream.fec {
 	    let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
-	    self.fec.entry(stream_id).or_insert(
-		Tetrys::new(fec_payload_length)
-		    .unwrap());
-	    let fec = self.fec.get_mut(&stream_id).unwrap();
-	    fec.encoder.set_reliability_level(reliability_level);
-	    fec.encoder.set_incremental(incremental);
+	    let f = self.fec.entry(stream_id)
+		.or_insert_with(||
+				Tetrys::new(fec_payload_length)
+				.unwrap());
+	    f.encoder.set_reliability_level(reliability_level);
+	    f.encoder.set_incremental(incremental);
+
+	    // let fec = self.fec.get_mut(&stream_id).unwrap();
+	    // fec.encoder.set_reliability_level(reliability_level);
+	    // fec.encoder.set_incremental(incremental);
 	}
 	
 	Ok(())
@@ -7953,15 +7959,22 @@ impl Connection {
 	    } => {
 		trace!("{} Processing repair frame", self.trace_id);
 		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
-		self.fec.entry(fec_session).or_insert(
-		    Tetrys::new(fec_payload_length)
-			.unwrap());
-		self.fec.get_mut(&fec_session).unwrap()
-		    .decoder.add_repair_symbol(smallest_sid,
-					       highest_sid,
-					       seed as u16,
-					       data.as_slice())
+		let f = self.fec.entry(fec_session)
+		    .or_insert_with(||
+				    Tetrys::new(fec_payload_length)
+				    .unwrap());
+		f.decoder
+		    .add_repair_symbol(smallest_sid,
+					    highest_sid,
+					    seed as u16,
+					    data.as_slice())
 		    .unwrap();
+		// self.fec.get_mut(&fec_session).unwrap()
+		//     .decoder.add_repair_symbol(smallest_sid,
+		// 			       highest_sid,
+		// 			       seed as u16,
+		// 			       data.as_slice())
+		//     .unwrap();
 	    },
 
 	    frame::Frame::RepairHeader {
@@ -7978,11 +7991,12 @@ impl Connection {
 	    } => {
 		trace!("{} Received Source Symbol {sid}", self.trace_id);
 		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
-		self.fec.entry(fec_session).or_insert(
-		    Tetrys::new(fec_payload_length)
-			.unwrap());
-		self.fec.get_mut(&fec_session).unwrap()
-		    .decoder.add_source_symbol(sid, fec_protected_payload.as_slice()).unwrap();
+		let f = self.fec.entry(fec_session)
+		    .or_insert_with(||
+			Tetrys::new(fec_payload_length).unwrap());
+		f.decoder.add_source_symbol(sid, fec_protected_payload.as_slice()).unwrap();
+		// self.fec.get_mut(&fec_session).unwrap()
+		//     .decoder.add_source_symbol(sid, fec_protected_payload.as_slice()).unwrap();
 	    },
 
 	    frame::Frame::SourceSymbolHeader {
@@ -7997,10 +8011,13 @@ impl Connection {
 	    } => {
 		trace!("{} received SymbolAck number {next_source_symbol}", self.trace_id);
 		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
-		self.fec.entry(fec_session).or_insert(
-		    Tetrys::new(fec_payload_length)
-			.unwrap());
-		self.fec.get_mut(&fec_session).unwrap().encoder.handle_ack(next_source_symbol);
+		let f = self.fec.entry(fec_session)
+		    .or_insert_with(||
+				    Tetrys::new(fec_payload_length)
+				    .unwrap());
+		f.encoder.handle_ack(next_source_symbol);
+
+		//self.fec.get_mut(&fec_session).unwrap().encoder.handle_ack(next_source_symbol);
 	    },
 	    
 	    frame::Frame::FECWindow {

@@ -68,11 +68,18 @@ pub struct Tetrys {
     pub decoder: Decoder,
 }
 
+impl Drop for Tetrys {
+    fn drop(&mut self) {
+	trace!("Dropping tetrys");
+    }
+}
+
 impl Tetrys {
     /// Constructs a new Tetrys
     pub fn new(
         max_payload_length: u16
     ) -> Result<Self, FecError> {
+	trace!("Creating new Tetrys context");
         let fec_config = FecConfig::new(
             max_payload_length.into(),
             MOEPGF_MAX_ALIGNMENT as usize,
