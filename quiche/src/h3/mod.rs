@@ -4263,12 +4263,12 @@ mod tests {
         let root = hierarchy.root;
 
         let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
-        let a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
-        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+        let _a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
+        let _a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
 
         let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
-        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
-        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let _b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let _b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
 
         let c = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(root));
 
@@ -4286,7 +4286,7 @@ mod tests {
 
         let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
         let a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
-        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+        let _a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
 
         let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
         let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
@@ -4351,25 +4351,6 @@ mod tests {
         assert_eq!(hierarchy.class(x2).guarantee, 2857);
         assert_eq!(hierarchy.class(z1).guarantee, 2000);
     }
-
-    #[test]
-    #[cfg(feature = "sfv")]
-    fn hierarchical_prios_to_hls_tree() {
-
-        // Define stream priorities
-        let a1= Priority::try_from(b"u=1,exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
-        let a2 = Priority::try_from(b"u=2,exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
-
-        let b1 = Priority::try_from(b"u=2,exp_w=0.6,exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
-        let b2 = Priority::try_from(b"u=2,exp_w=0.6,exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
-
-        let c = Priority::try_from(b"u=1".as_slice());
-
-        let priority_values_vector: Vec<Result<Priority>> = vec![a1, a2, b1, b2, c];
-
-        assert_eq!(0, 0);
-    }
-
     #[test]
     /// Send a PRIORITY_UPDATE for request stream from the client.
     fn priority_update_request() {

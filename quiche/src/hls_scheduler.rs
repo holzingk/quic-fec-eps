@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fmt::Formatter;
+use itertools::Itertools;
 
 /// Implementation of the Hierarchical Link Sharing (HLS) Scheduling algorithm.
 #[derive(Clone, Debug)]
@@ -120,6 +121,45 @@ impl HLSHierarchy {
         for node_id in node_ids {
             self.guarantee_from_weight(node_id);
         }
+    }
+
+    /// Removes a stream that has finished from the hierarchy.
+    pub fn delete_class(&mut self, stream_id: u64, mtu: usize) {
+        let root = self.root;
+        let capacity = self.capacity;
+        let leaves = self.leaf_descendants(root);
+
+        let mut capacity_decrease: u64 = 0;
+
+        // Find the leaf with the corresponding stream ID
+        if let Some(class_id) = leaves.iter().find_or_first(|l| self.class(**l).stream_id == Option::from(stream_id)) {
+            let mut class = self.class(*class_id);
+
+            // Remove children bottom-up
+            while let Some(parent_id) = class.parent {
+                let parent_class = self.mut_class(parent_id);
+                parent_class.children.remove(class_id);
+
+                if parent_class.children.is_empty() {
+                    // No children left, remove this class now too
+                    class = parent_class;
+
+                    // Reduce the capacity.
+                    capacity_decrease += mtu as u64;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if capacity >= capacity_decrease {
+            self.capacity -= capacity_decrease
+        } else {
+            self.capacity = 0
+        };
+
+        // Done. Generate new guarantees.
+        self.generate_guarantees();
     }
 }
 
@@ -384,7 +424,7 @@ impl fmt::Debug for HLSHierarchy {
                 "{}{}: g={}, w={}, u={}, i={}, r={}, b={}, a={}, blnc={}, {}res={}",
                 current_prefix,
                 match class.stream_id {
-                    Some(stream_id) => format!("stream {}", stream_id),
+                    Some(stream_id) => format!("stream {} (class {})", stream_id, class.id),
                     None => class.id.to_string(),
                 },
                 class.guarantee,
@@ -595,7 +635,7 @@ impl HLSScheduler {
         let constant = sum_internal_weights + sum_leaf_weights;
         let dynamic = sum_active_leaf_weights;
 
-        let q = constant + dynamic;
+        let q = constant;
 
         trace!(
             r#"{{"q":{},"constant":{}, "dynamic":{}}}"#,
@@ -610,7 +650,6 @@ impl HLSScheduler {
     /// Prepares the round-robin scheduler for a new main round.
     /// `backlogged_streams`: Vector of flushable stream IDs
     pub(crate) fn init_round(&mut self, backlogged_streams: Vec<u64>) {
-        let _l_ac_eps = self.backlogged_classes_from_hierarchy();
         let root_id = self.hierarchy.root;
 
         // Active classes are determined at the start of every round.
@@ -685,7 +724,6 @@ impl HLSScheduler {
         }
 
         // The HLS paper states the round-robin happens at an arbitrary order.
-        // Set the round-robin order to match Quiche's priorities instead.
         for sid in backlogged_streams.clone() {
             // Get the leaf in the hierarchy with a matching stream id
             if let Some(leaf) = leaf_classes
@@ -870,12 +908,12 @@ impl HLSScheduler {
 
     /// Uses BFS to determine the set of active classes (internal and leaf classes)
     /// for the current scheduling round.
-    pub(crate) fn backlogged_classes_from_hierarchy(&mut self) -> HashSet<u64> {
+    pub(crate) fn backlogged_classes_from_hierarchy(&mut self) -> Vec<u64> {
         let mut bfs_frontier: VecDeque<u64> = VecDeque::new();
         let hierarchy = &self.hierarchy;
         let root = hierarchy.root;
 
-        let mut l_ac_eps: HashSet<u64> = HashSet::new();
+        let mut l_ac_eps: Vec<u64> = Vec::new();
 
         // Start exploring from the root.
         bfs_frontier.push_back(root);
@@ -918,7 +956,7 @@ impl HLSScheduler {
 
                         // If the class is a leaf, mark it as an active leaf.
                         if ps.children.is_empty() {
-                            l_ac_eps.insert(id);
+                            l_ac_eps.push(id);
                         } else {
                             // Continue the search starting from this internal node.
                             bfs_frontier.push_back(id);
