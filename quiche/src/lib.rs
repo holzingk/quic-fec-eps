@@ -2262,6 +2262,12 @@ impl Connection {
     fn recv_single(
         &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
     ) -> Result<usize> {
+        let mtu: usize = self
+            .path_stats()
+            .filter_map(|p| Option::from(p.pmtu))
+            .min()
+            .unwrap_or(1500);
+
         let now = time::Instant::now();
 
         if buf.is_empty() {
@@ -2965,6 +2971,9 @@ impl Connection {
                         // readable. If it is readable, it will get collected when
                         // stream_recv() is used.
                         if stream.is_complete() && !stream.is_readable() {
+                            // Remove the class from the hierarchy as soon as the stream completes
+                            self.hls_scheduler.hierarchy.delete_class(stream_id, mtu);
+
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
                         }
@@ -2989,6 +2998,9 @@ impl Connection {
                         // readable. If it is readable, it will get collected when
                         // stream_recv() is used.
                         if stream.is_complete() && !stream.is_readable() {
+                            // Remove the class from the hierarchy as soon as the stream completes
+                            self.hls_scheduler.hierarchy.delete_class(stream_id, mtu);
+
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
                         }
@@ -4427,14 +4439,14 @@ impl Connection {
                 //         }
                 //     }
                 // }
-                //
-                // for stream_id in not_flushable {
-                //     let priority_key = Arc::clone(
-                //         &self.streams.get(stream_id).unwrap().priority_key,
-                //     );
-                //
-                //     self.streams.remove_flushable(&priority_key);
-                // }
+
+                let backlogged_eps_streams: Vec<u64> = backlogged_eps
+                    .iter()
+                    .map(|l| scheduler.hierarchy.class(*l).stream_id.unwrap())
+                    .collect();
+
+                // Check that the stream is not finished. If it has, remove the stream
+                // from the hierarchy and advance the round-robin.
 
                 scheduler.init_round(hls_round);
             }
@@ -4450,8 +4462,6 @@ impl Connection {
                 );
                 let stream_off_front =
                     self.streams.get(stream_id).unwrap().send.off_front();
-                let stream_off_back =
-                    self.streams.get(stream_id).unwrap().send.off_back();
 
                 // Encode the frame.
                 //
@@ -4486,7 +4496,7 @@ impl Connection {
                     b.split_at(hdr_off + hdr_len)?;
 
                 // How much data the stream currently has queued to send.
-                let stream_request = stream_off_back - stream_off_front;
+                let stream_request = stream.send.len;
                 trace!(
                     "Round-robin: stream {} is requesting {} bytes",
                     stream_id,
@@ -4911,6 +4921,12 @@ impl Connection {
     pub fn stream_recv(
         &mut self, stream_id: u64, out: &mut [u8],
     ) -> Result<(usize, bool)> {
+        let mtu: usize = self
+            .path_stats()
+            .filter_map(|p| Option::from(p.pmtu))
+            .min()
+            .unwrap_or(1500);
+
         // We can't read on our own unidirectional streams.
         if !stream::is_bidi(stream_id) &&
             stream::is_local(stream_id, self.is_server)
@@ -4942,6 +4958,8 @@ impl Connection {
                 // the application, so we don't need to keep the stream's state
                 // anymore.
                 if stream.is_complete() {
+                    // Remove the class from the hierarchy as soon as the stream completes
+                    self.hls_scheduler.hierarchy.delete_class(stream_id, mtu);
                     self.streams.collect(stream_id, local);
                 }
 
@@ -4965,6 +4983,8 @@ impl Connection {
         }
 
         if complete {
+            // Remove the class from the hierarchy as soon as the stream completes
+            self.hls_scheduler.hierarchy.delete_class(stream_id, mtu);
             self.streams.collect(stream_id, local);
         }
 

@@ -66,7 +66,7 @@ pub struct SendBuf {
     emit_off: u64,
 
     /// The amount of data currently buffered.
-    len: u64,
+    pub(crate) len: u64,
 
     /// The maximum offset we are allowed to send to the peer.
     max_data: u64,
