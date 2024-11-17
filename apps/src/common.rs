@@ -1350,7 +1350,9 @@ impl HttpConn for Http3Conn {
 			    }
 			    for chunk in buf[zeros_front..(aligned_len + zeros_front)].chunks(std::mem::size_of::<u128>()) {
 				let sent_ts = u128::from_be_bytes(chunk.try_into().unwrap());
-				let now_rel = now.checked_sub(sent_ts).expect("no time travel possible");
+				let first_byte_ts = req.t_first_byte.expect("We already get data, so is Some")
+				    .duration_since(UNIX_EPOCH).expect("we are past unix epoch").as_micros();
+				let now_rel = now.checked_sub(first_byte_ts).expect("no time travel possible");
 				let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
 				let now_rel_bytes = u64::try_from(now_rel).expect("requests don't take long").to_be_bytes();
 				let flight_time_bytes = u64::try_from(flight_time).expect("only short flight times expected").to_be_bytes();
