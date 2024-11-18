@@ -906,14 +906,14 @@ impl HLSScheduler {
         }
     }
 
-    /// Uses BFS to determine the set of active classes (internal and leaf classes)
-    /// for the current scheduling round.
-    pub(crate) fn backlogged_classes_from_hierarchy(&mut self) -> Vec<u64> {
+    /// Uses BFS to determine the set of active streams for the current scheduling round.
+    /// Returns the stream id.
+    pub(crate) fn backlogged_classes_from_hierarchy(&mut self, flushable: Vec<u64>) -> Vec<u64> {
         let mut bfs_frontier: VecDeque<u64> = VecDeque::new();
         let hierarchy = &self.hierarchy;
         let root = hierarchy.root;
 
-        let mut l_ac_eps: Vec<u64> = Vec::new();
+        let mut active_streams: Vec<u64> = Vec::new();
 
         // Start exploring from the root.
         bfs_frontier.push_back(root);
@@ -956,22 +956,26 @@ impl HLSScheduler {
 
                         // If the class is a leaf, mark it as an active leaf.
                         if ps.children.is_empty() {
-                            l_ac_eps.push(id);
+                            if let Some(stream_id) = ps.stream_id {
+                                if flushable.contains(&stream_id) {
+                                    active_streams.push(stream_id);
+                                    // Break if the class is not incremental.
+                                    // This is to avoid non-incremental classes
+                                    // sharing bandwidth.
+                                    if !ps.incremental {
+                                        break;
+                                    }
+                                }
+                            }
                         } else {
                             // Continue the search starting from this internal node.
                             bfs_frontier.push_back(id);
-                        }
-
-                        // Break if the class is not incremental, preventing non-incremental classes
-                        // from sharing bandwidth.
-                        if !ps.incremental {
-                            break;
                         }
                     }
                 }
             }
         }
 
-        l_ac_eps
+        active_streams
     }
 }

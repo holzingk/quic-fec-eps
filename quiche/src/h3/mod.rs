@@ -4257,28 +4257,41 @@ mod tests {
 
     #[test]
     pub fn hls_bfs_priority_order() {
+        // Stream IDs
+        let stream_a1 = 0;
+        let stream_a2 = 4;
+        let stream_b1 = 8;
+        let stream_b2 = 12;
+        let stream_c = 16;
+
         let mut hierarchy = HLSHierarchy::new();
 
         // Build tree in a top-down manner, reflecting EPS parsing.
         let root = hierarchy.root;
 
         let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
-        let _a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
-        let _a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+        let a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
+        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
 
         let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
-        let _b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
-        let _b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
 
         let c = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(root));
 
+        hierarchy.set_stream_id(a1, stream_a1);
+        hierarchy.set_stream_id(a2, stream_a2);
+        hierarchy.set_stream_id(b1, stream_b1);
+        hierarchy.set_stream_id(b2, stream_b2);
+        hierarchy.set_stream_id(c, stream_c);
+
         let mut scheduler = HLSScheduler::new(hierarchy);
 
-        let l_ac_eps = scheduler.backlogged_classes_from_hierarchy();
+        let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_a1, stream_a2, stream_b1, stream_b2, stream_c]);
 
         // Only C should be scheduled.
-        assert_eq!(l_ac_eps.len(), 1);
-        assert!(l_ac_eps.contains(&c));
+        assert_eq!(active_streams.len(), 1);
+        assert!(active_streams.contains(&stream_c));
 
         // Now, simulate C finishing the transmission and leaving the hierarchy.
         let mut hierarchy = HLSHierarchy::new();
@@ -4286,19 +4299,24 @@ mod tests {
 
         let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
         let a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
-        let _a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
 
         let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
         let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
         let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
 
-        let mut scheduler = HLSScheduler::new(hierarchy);
-        let l_ac_eps = scheduler.backlogged_classes_from_hierarchy();
+        hierarchy.set_stream_id(a1, stream_a1);
+        hierarchy.set_stream_id(a2, stream_a2);
+        hierarchy.set_stream_id(b1, stream_b1);
+        hierarchy.set_stream_id(b2, stream_b2);
 
-        assert_eq!(l_ac_eps.len(), 3);
-        assert!(l_ac_eps.contains(&a1));
-        assert!(l_ac_eps.contains(&b1));
-        assert!(l_ac_eps.contains(&b2));
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_a1, stream_a2, stream_b1, stream_b2]);
+
+        assert_eq!(active_streams.len(), 3);
+        assert!(active_streams.contains(&stream_a1));
+        assert!(active_streams.contains(&stream_b1));
+        assert!(active_streams.contains(&stream_b2));
 
         // Now, suppose A1 finishes.
         let mut hierarchy = HLSHierarchy::new();
@@ -4309,15 +4327,19 @@ mod tests {
         let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
         let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
         let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
-        
+
+        hierarchy.set_stream_id(a2, stream_a2);
+        hierarchy.set_stream_id(b1, stream_b1);
+        hierarchy.set_stream_id(b2, stream_b2);
+
         let mut scheduler = HLSScheduler::new(hierarchy);
 
-        let l_ac_eps = scheduler.backlogged_classes_from_hierarchy();
+        let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_a2, stream_b1, stream_b2]);
 
-        assert_eq!(l_ac_eps.len(), 3);
-        assert!(l_ac_eps.contains(&a2));
-        assert!(l_ac_eps.contains(&b1));
-        assert!(l_ac_eps.contains(&b2));
+        assert_eq!(active_streams.len(), 3);
+        assert!(active_streams.contains(&stream_a2));
+        assert!(active_streams.contains(&stream_b1));
+        assert!(active_streams.contains(&stream_b2));
     }
 
     // Sample hierarchy specification, cf. page 9 and 26 of the HLS MA thesis

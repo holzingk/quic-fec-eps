@@ -4385,8 +4385,7 @@ impl Connection {
             if scheduler.pending_leaves.front().copied().is_none() {
                 // The determination of active classes is done at the start of a round
                 // For each flushable stream, push it into a set with the stream ID of each stream.
-                let backlogged_eps = scheduler.backlogged_classes_from_hierarchy();
-                let mut hls_round: Vec<u64> = Vec::new();
+                let mut flushable: Vec<u64> = Vec::new();
                 let mut not_flushable: Vec<u64> = Vec::new();
 
                 for priority_key in self.streams.flushable.iter() {
@@ -4398,7 +4397,7 @@ impl Connection {
                         // This might happen if stream data was buffered but not yet
                         // flushed on the wire when a STOP_SENDING frame is received.
                         Some(v) if !v.send.is_stopped() => {
-                            hls_round.push(stream_id)
+                            flushable.push(stream_id)
                         },
                         _ => {
                             not_flushable.push(stream_id);
@@ -4414,13 +4413,8 @@ impl Connection {
                     self.streams.remove_flushable(&priority_key);
                 }
 
-                let backlogged_eps_streams: Vec<u64> = backlogged_eps
-                    .iter()
-                    .map(|l| scheduler.hierarchy.class(*l).stream_id.unwrap())
-                    .collect();
-
-                // Check that the stream is not finished. If it has, remove the stream
-                // from the hierarchy and advance the round-robin.
+                // Use the flushable streams to determine which streams to use in this round.
+                let hls_round = scheduler.backlogged_classes_from_hierarchy(flushable);
 
                 scheduler.init_round(hls_round);
             }
