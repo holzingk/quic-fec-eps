@@ -4414,32 +4414,6 @@ impl Connection {
                     self.streams.remove_flushable(&priority_key);
                 }
 
-                // for class_id in backlogged_eps {
-                //     println!("backlogged eps = {:?}", class_id);
-                //     let leaf = scheduler.hierarchy.class(class_id);
-                //
-                //     if let Some(stream_id) = leaf.stream_id {
-                //         if let Some(stream) = self.streams.get(stream_id) {
-                //             // If the stream finished, remove it from the hierarchy.
-                //             if stream.send.is_fin() {
-                //                 println!("stream {} finished", stream_id);
-                //                 scheduler.hierarchy.delete_class(class_id, path.recovery.max_datagram_size());
-                //                 continue;
-                //             }
-                //
-                //             // Avoid sending frames for streams that were already stopped.
-                //             //
-                //             // This might happen if stream data was buffered but not yet
-                //             // flushed on the wire when a STOP_SENDING frame is received.
-                //             if stream.is_flushable() && !stream.send.is_stopped(){
-                //                 hls_round.push(stream_id);
-                //             } else {
-                //                 not_flushable.push(stream_id);
-                //             }
-                //         }
-                //     }
-                // }
-
                 let backlogged_eps_streams: Vec<u64> = backlogged_eps
                     .iter()
                     .map(|l| scheduler.hierarchy.class(*l).stream_id.unwrap())
