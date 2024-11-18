@@ -4512,7 +4512,7 @@ impl Connection {
 
                 // A stream cannot emit more than the root's baseline capacity.
                 let root_id = scheduler.hierarchy.root;
-                let leaf_max_data = scheduler.hierarchy.class(root_id).weight as i64;
+                let leaf_max_data = scheduler.hierarchy.class(root_id).guarantee;
                 let max_request_left =
                     leaf_max_data - scheduler.hierarchy.class(l_id).emitted;
 
