@@ -724,7 +724,6 @@ impl HLSScheduler {
 
         // The HLS paper states the round-robin happens at an arbitrary order.
         for sid in backlogged_streams.clone() {
-            println!("sid = {}", sid);
             // Get the leaf in the hierarchy with a matching stream id
             if let Some(leaf) = leaf_classes
                 .iter()
