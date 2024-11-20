@@ -491,9 +491,6 @@ pub struct HLSScheduler {
     /// Set of active internal classes.
     i_ac: HashSet<u64>,
 
-    /// Total number of bytes from all classes that can be transmitted in a round.
-    pub(crate) q: i64,
-
     /// The class hierarchy.
     pub hierarchy: HLSHierarchy,
 
@@ -511,7 +508,6 @@ impl HLSScheduler {
     /// Creates a new HLS scheduler.
     pub fn new(hierarchy: HLSHierarchy) -> HLSScheduler {
         HLSScheduler {
-            q: 0,
             hierarchy,
             i_ac: HashSet::new(),
             l_ac: HashSet::new(),
@@ -608,45 +604,6 @@ impl HLSScheduler {
         fair_quota
     }
 
-    // "The total weights of all non-root active classes and the total maximum packet sizes of
-    // active leaf classes determine the amount of quota allocated to each class,
-    // which dictates the round size."
-    fn calculate_q(
-        &self, leaf_classes: HashSet<u64>, active_leaves: HashSet<u64>,
-        internal_classes: HashSet<u64>,
-    ) -> i64 {
-        // Sum of the weights of the leaf classes
-        let sum_leaf_weights = leaf_classes
-            .iter()
-            .map(|id| self.hierarchy.class(*id).guarantee)
-            .sum::<i64>();
-
-        // Sum of the weights of the internal classes
-        let sum_internal_weights = internal_classes
-            .iter()
-            .map(|id| self.hierarchy.class(*id).guarantee)
-            .sum::<i64>();
-
-        let sum_active_leaf_weights = active_leaves
-            .iter()
-            .map(|id| self.hierarchy.class(*id).guarantee)
-            .sum::<i64>();
-
-        let constant = sum_internal_weights + sum_leaf_weights;
-        let dynamic = sum_active_leaf_weights;
-
-        let q = constant;
-
-        trace!(
-            r#"{{"q":{},"constant":{}, "dynamic":{}}}"#,
-            q,
-            constant,
-            dynamic
-        );
-
-        q
-    }
-
     /// Prepares the round-robin scheduler for a new main round.
     /// `backlogged_streams`: Vector of flushable stream IDs
     pub(crate) fn init_round(&mut self, backlogged_streams: Vec<u64>) {
@@ -656,6 +613,7 @@ impl HLSScheduler {
 
         let internal_classes: HashSet<u64> =
             self.hierarchy.internal_nodes(root_id);
+
         let leaf_classes: HashSet<u64> = self.hierarchy.leaf_descendants(root_id);
 
         let mut i_ac: HashSet<u64> = HashSet::new();
@@ -665,17 +623,9 @@ impl HLSScheduler {
 
         // Initialize the scheduler before there are any active classes.
         if !self.main_round && !self.surplus_round {
-            let q = self.calculate_q(
-                leaf_classes.clone(),
-                HashSet::new(),
-                internal_classes.clone(),
-            );
-
-            {
-                let root_id = self.hierarchy.root;
-                let root = self.hierarchy.mut_class(root_id);
-                root.balance = q;
-            }
+            let root_id = self.hierarchy.root;
+            let root = self.hierarchy.mut_class(root_id);
+            root.balance = root.guarantee;
         }
 
         // Determine which leaf classes are active. Recomputed every round, i.e., main or surplus.
@@ -789,14 +739,6 @@ impl HLSScheduler {
             }
         }
 
-        // Dynamically adjust Q* at the start of the round now that we know which leaves are active.
-        let q = self.calculate_q(
-            leaf_classes.clone(),
-            l_ac.clone(),
-            internal_classes.clone(),
-        );
-        self.q = q;
-
         // After initialization, the scheduler is always either in a main or surplus round.
         self.surplus_round = do_surplus;
         self.main_round = !do_surplus;
@@ -817,36 +759,6 @@ impl HLSScheduler {
     /// Sets the HLS hierarchy used by the scheduler in each round.
     pub fn set_hierarchy(&mut self, hierarchy: HLSHierarchy) {
         self.hierarchy = hierarchy;
-    }
-
-    /// Ensures that the updated balance counters follow the invariant specified in the HLS paper.
-    /// This check is performed after applying the updates outlined by formulas (5) through (9).
-    pub(crate) fn hls_invariant_holds(&self) -> bool {
-        let sum_balances = self
-            .hierarchy
-            .classes
-            .values()
-            .map(|c| c.balance)
-            .sum::<i64>();
-
-        let root_id = self.hierarchy.root;
-        let root_residual = self.hierarchy.class(root_id).residual;
-        let internal_classes = self.hierarchy.internal_nodes(root_id);
-
-        // Sum up the residual of each internal class
-        let sum_residuals = internal_classes
-            .iter()
-            .map(|c| self.hierarchy.class(*c).residual)
-            .sum::<i64>();
-
-        let invariant = sum_balances + sum_residuals + root_residual;
-
-        trace!(
-            "Sum of balances and residuals of {} should match Q*={}",
-            invariant,
-            self.q
-        );
-        invariant == self.q
     }
 
     /// Returns the sum of the weights of the active children of a class.
