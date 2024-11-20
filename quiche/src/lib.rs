@@ -4465,7 +4465,7 @@ impl Connection {
 
                 // How much data the stream currently has queued to send.
                 let stream_request = stream.send.len;
-                trace!(
+                debug!(
                     "Round-robin: stream {} is requesting {} bytes",
                     stream_id,
                     stream_request
@@ -4525,7 +4525,7 @@ impl Connection {
                 // current round".
                 if remaining_balance <= 0 || emitted >= leaf_max_data {
                     // Remove the stream from the round-robin queue.
-                    trace!("Visit complete for stream {stream_id} with leaf id {l_id}. Still requesting: {backlogged_stream_data}B");
+                    debug!("Visit complete for stream {stream_id} with leaf id {l_id}. Still requesting: {backlogged_stream_data}B");
                     scheduler.pending_leaves.pop_front();
                 }
 

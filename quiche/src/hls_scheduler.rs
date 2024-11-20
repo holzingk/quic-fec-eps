@@ -539,7 +539,7 @@ impl HLSScheduler {
             parent.balance -= leaf_quota;
         }
 
-        trace!("Ticked hierarchy is: {:?}", &self.hierarchy);
+        debug!("Ticked hierarchy is: {:?}", &self.hierarchy);
     }
 
     /// Returns the fair quota of the requested class.
@@ -653,12 +653,12 @@ impl HLSScheduler {
 
                 // Modify root's residual to dynamically adjust Q*.
                 if became_active {
-                    trace!("Stream {} became active. Adding {} to root's residual.", sid, leaf_guarantee);
+                    debug!("Stream {} became active. Adding {} to root's residual.", sid, leaf_guarantee);
                     self.hierarchy.mut_class(root_id).residual += leaf_guarantee;
                 }
 
                 if became_idle {
-                    trace!("Stream {} became idle in the past round. Subtracting {} from root's residual.", sid, leaf_guarantee);
+                    debug!("Stream {} became idle in the past round. Subtracting {} from root's residual.", sid, leaf_guarantee);
                     self.hierarchy.mut_class(root_id).residual -= leaf_guarantee;
                 }
 
@@ -788,7 +788,7 @@ impl HLSScheduler {
                 let active_classes: HashSet<u64> =
                     self.l_ac.union(&self.i_ac).copied().collect();
 
-                trace!(
+                debug!(
                     "Returned residual of {class_balance} to the parent.{:?}",
                     &self.hierarchy
                 );
