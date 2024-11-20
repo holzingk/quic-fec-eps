@@ -628,57 +628,40 @@ impl HLSScheduler {
             root.balance = root.guarantee;
         }
 
-        // Determine which leaf classes are active. Recomputed every round, i.e., main or surplus.
-        for leaf in leaf_classes.clone() {
-            let stream_id = self.hierarchy.class(leaf).stream_id.unwrap();
-            let became_idle = self.hierarchy.class(leaf).idle;
-            let leaf_weight = self.hierarchy.class(leaf).guarantee;
-
-            // Mark leaves as not being yet ticked.
-            self.hierarchy.mut_class(leaf).ticked = false;
-
-            if backlogged_streams.contains(&stream_id) {
-                let became_active = !prev_active_leaves.contains(&leaf);
-
-                {
-                    let stream_class = self.hierarchy.mut_class(leaf);
-                    stream_class.emitted = 0;
-                    l_ac.insert(stream_class.id);
-                }
-
-                // Modify root's residual do dynamically adjust Q*.
-                if became_active {
-                    {
-                        trace!("Stream {} became active. Adding {} to root's residual.", stream_id, leaf_weight);
-                        let root = self.hierarchy.mut_class(root_id);
-                        root.residual += leaf_weight;
-                    }
-                }
-            }
-
-            if became_idle {
-                {
-                    trace!("Stream {} became idle in the past round. Subtracting {} from root's residual.", stream_id, leaf_weight);
-                    let root = self.hierarchy.mut_class(root_id);
-                    root.residual -= leaf_weight;
-                }
-            }
-
-            {
-                let stream_class = self.hierarchy.mut_class(leaf);
-
-                // Reset idle indicator
-                stream_class.idle = false;
-            }
-        }
-
-        // The HLS paper states the round-robin happens at an arbitrary order.
+        // Marks the backlogged streams as active for a main or surplus round.
         for sid in backlogged_streams.clone() {
             // Get the leaf in the hierarchy with a matching stream id
             if let Some(leaf) = leaf_classes
                 .iter()
                 .find(|id| self.hierarchy.class(**id).stream_id.unwrap() == sid)
             {
+                let stream_class = self.hierarchy.mut_class(*leaf);
+
+                let became_idle = stream_class.idle;
+                let became_active = !prev_active_leaves.contains(&leaf);
+                let leaf_guarantee = stream_class.guarantee;
+
+                // This stream is now active.
+                stream_class.idle = false;
+                l_ac.insert(stream_class.id);
+
+                // Mark leaves as not being yet ticked.
+                stream_class.ticked = false;
+
+                // This stream has not emitted in this round.
+                stream_class.emitted = 0;
+
+                // Modify root's residual to dynamically adjust Q*.
+                if became_active {
+                    trace!("Stream {} became active. Adding {} to root's residual.", sid, leaf_guarantee);
+                    self.hierarchy.mut_class(root_id).residual += leaf_guarantee;
+                }
+
+                if became_idle {
+                    trace!("Stream {} became idle in the past round. Subtracting {} from root's residual.", sid, leaf_guarantee);
+                    self.hierarchy.mut_class(root_id).residual -= leaf_guarantee;
+                }
+
                 pending_leaves.push_back(*leaf);
             }
         }
@@ -689,7 +672,7 @@ impl HLSScheduler {
             node.fair_quota = None;
         }
 
-        // Ancestors of an active leaf are active internal classes (excluding the root).
+        // The ancestors of an active leaf are active internal classes too (excluding the root).
         for id in l_ac.clone() {
             let ancestors = self.hierarchy.ancestors(id);
             i_ac.extend(ancestors);
