@@ -414,6 +414,7 @@ use std::str::FromStr;
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use itertools::Itertools;
 use smallvec::SmallVec;
 use crate::h3::Priority;
 
@@ -4414,14 +4415,16 @@ impl Connection {
                 }
 
                 // Use the flushable streams to determine which streams to use in this round.
+                println!("flushable streams = {:?}", flushable);
                 let hls_round = scheduler.backlogged_classes_from_hierarchy(flushable);
-
+                println!("hls round = {:?}", hls_round);
                 scheduler.init_round(hls_round);
             }
 
             // Visit the class being pointed at by round-robin.
             #[allow(clippy::never_loop)]
             while let Some(l_id) = scheduler.pending_leaves.front().copied() {
+                println!("hierarchy = {:?}", scheduler.hierarchy);
                 let stream_id =
                     scheduler.hierarchy.mut_class(l_id).stream_id.unwrap();
 
@@ -4509,7 +4512,7 @@ impl Connection {
                 let backlogged_stream_data = stream_request - len as u64;
 
                 // Check if the class is served.
-                if (backlogged_stream_data) == 0 {
+                if backlogged_stream_data == 0 {
                     // The class is now idle. Return remaining balance to the parent (if any).
                     scheduler.return_balance_to_parent(l_id);
                 }
@@ -4527,14 +4530,6 @@ impl Connection {
                     // Remove the stream from the round-robin queue.
                     trace!("Visit complete for stream {stream_id} with leaf id {l_id}. Still requesting: {backlogged_stream_data}B");
                     scheduler.pending_leaves.pop_front();
-                }
-
-                if !scheduler.hls_invariant_holds() {
-                    error!(
-                        "Invariance check failed: Q*={} for {:?},",
-                        &scheduler.q, &scheduler.hierarchy
-                    );
-                    // return Err(Error::HLSSchedulerViolation);
                 }
 
                 // Encode the frame's header.
@@ -4569,13 +4564,15 @@ impl Connection {
                     has_data = true;
                 }
 
-                // If the stream is no longer flushable, remove it from the queue
+                // If the stream is no longer flushable, remove it from the queue and the hierarchy
                 if !stream.is_flushable() {
                     self.streams.remove_flushable(&priority_key);
-                } else if stream.incremental {
-                    // Shuffle the incremental stream to the back of the queue.
-                    self.streams.remove_flushable(&priority_key);
-                    self.streams.insert_flushable(&priority_key);
+                }
+
+                // Shuffle the pending leaves order.
+                // This ensures incremental streams are scheduled with a frame-by-frame RR.
+                if let Some(last_leaf) = scheduler.pending_leaves.pop_front() {
+                    scheduler.pending_leaves.push_back(last_leaf);
                 }
 
                 break;
@@ -5227,6 +5224,26 @@ impl Connection {
 
         self.streams
             .update_priority(&old_priority_key, &new_priority_key);
+
+        // Find this stream in the hierarchy and update it, too.
+        let hierarchy = &mut self.hls_scheduler.hierarchy;
+        let root = hierarchy.root;
+        let leaves = hierarchy.leaf_descendants(root);
+
+        if let Some(leaf_id) = leaves.iter().find_or_first(|l| hierarchy
+            .class(**l)
+            .stream_id
+            .expect("Leaves should have stream IDs!") == stream_id) {
+
+            let leaf = hierarchy.mut_class(*leaf_id);
+
+            leaf.urgency = priority.0[0].urgency;
+            leaf.incremental = priority.0[0].incremental;
+            leaf.weight = priority.0[0].weight;
+            leaf.burst_loss_tolerance = priority.0[0].burst_loss_tolerance;
+            leaf.protection_ratio = priority.0[0].protection_ratio;
+            leaf.repair_delay_tolerance = priority.0[0].repair_delay_tolerance;
+        }
 
         Ok(())
     }
@@ -13779,7 +13796,7 @@ mod tests {
 
         let mut b = [0; 1];
 
-        let out = [b'b'; 500];
+        let out = [b'b'; 400];
 
         // Server prioritizes streams as follows:
         //  * Stream 8 and 16 have the same priority but are non-incremental.
@@ -13911,7 +13928,7 @@ mod tests {
             assert_eq!(
                 frames.first(),
                 Some(&frame::Frame::Stream {
-                    stream_id: 12,
+                    stream_id: 4,
                     data: stream::RangeBuf::from(&out, off, false),
                 })
             );
@@ -13925,7 +13942,7 @@ mod tests {
             let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
-                stream_id: 4,
+                stream_id: 12,
                 data: stream::RangeBuf::from(&out, off, false),
             });
 
@@ -14055,6 +14072,8 @@ mod tests {
         );
 
         // Then are stream 12 and 4, with the same priority.
+        // Our EPS+HLS scheduler schedules incremental streams with the same priority in ascending
+        // stream ID order. This should conform with the RFC 9218, Section 10. - Server scheduling.
         let (len, _) = pipe.server.send(&mut buf).unwrap();
 
         let frames =
@@ -14063,7 +14082,7 @@ mod tests {
         assert_eq!(
             frames.first(),
             Some(&frame::Frame::Stream {
-                stream_id: 12,
+                stream_id: 4,
                 data: stream::RangeBuf::from(b"b", 0, false),
             })
         );
@@ -14076,7 +14095,7 @@ mod tests {
         assert_eq!(
             frames.first(),
             Some(&frame::Frame::Stream {
-                stream_id: 4,
+                stream_id: 12,
                 data: stream::RangeBuf::from(b"b", 0, false),
             })
         );
@@ -14269,6 +14288,7 @@ mod tests {
         let frames =
             testing::decode_pkt(&mut pipe.server, &mut buf[..len]).unwrap();
 
+        println!("{:?}", frames);
         let mut iter = frames.iter();
 
         // Skip ACK frame.

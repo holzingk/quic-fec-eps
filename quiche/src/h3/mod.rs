@@ -4289,6 +4289,7 @@ mod tests {
 
         let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_a1, stream_a2, stream_b1, stream_b2, stream_c]);
 
+        println!("hierarchy: {:?}", scheduler.hierarchy);
         // Only C should be scheduled.
         assert_eq!(active_streams.len(), 1);
         assert!(active_streams.contains(&stream_c));

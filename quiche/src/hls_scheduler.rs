@@ -651,7 +651,6 @@ impl HLSScheduler {
     /// `backlogged_streams`: Vector of flushable stream IDs
     pub(crate) fn init_round(&mut self, backlogged_streams: Vec<u64>) {
         let root_id = self.hierarchy.root;
-
         // Active classes are determined at the start of every round.
         let prev_active_leaves = self.l_ac.clone();
 
@@ -725,6 +724,7 @@ impl HLSScheduler {
 
         // The HLS paper states the round-robin happens at an arbitrary order.
         for sid in backlogged_streams.clone() {
+            println!("sid = {}", sid);
             // Get the leaf in the hierarchy with a matching stream id
             if let Some(leaf) = leaf_classes
                 .iter()
@@ -931,7 +931,7 @@ impl HLSScheduler {
                     .map(|c| hierarchy.class(c))
                     .collect();
 
-                // Sort by class ID first to aovid fuzzy tests, as sets have no defined order.
+                // Sort by class ID first to avoid fuzzy tests, as sets have no defined order.
                 // HLS IDs should reflect the order of the requests as a tiebraker.
                 priority_siblings.sort_by_key(|sibling| sibling.id);
 
@@ -940,14 +940,30 @@ impl HLSScheduler {
 
                 // Now, iterate over the children to prune the search tree.
                 // We only include nodes at the same (and highest) urgency level.
-                // The layer is already sorted. So the highest urgency is at the front.
-                if let Some(class) = priority_siblings.first() {
-                    let max_urgency = class.urgency;
 
+                // The layer is already sorted. So the highest urgency is at the front.
+                // But if the first node is a leaf, it needs to be in the flushable set.
+                let mut max_urgency: Option<u8> = None;
+
+                for sib in priority_siblings.clone() {
+                    // Only leaf nodes have stream IDs
+                    if let Some(stream_id) = sib.stream_id {
+                        if flushable.contains(&stream_id) {
+                            max_urgency = Some(sib.urgency);
+                            break;
+                        }
+                    } else {
+                        // Internal node. Found the highest priority.
+                        max_urgency = Some(sib.urgency);
+                        break;
+                    }
+                }
+
+                if let Some(urgency) = max_urgency {
                     // Now, we filter the layer to only keep nodes at that urgency level.
                     let backlogged_classes: Vec<&&HLSClass> = priority_siblings
                         .iter()
-                        .filter(|c| c.urgency == max_urgency)
+                        .filter(|c| c.urgency == urgency)
                         .collect();
 
                     // Enqueue newly found classes in priority order.
@@ -955,16 +971,14 @@ impl HLSScheduler {
                         let id = ps.id;
 
                         // If the class is a leaf, mark it as an active leaf.
-                        if ps.children.is_empty() {
-                            if let Some(stream_id) = ps.stream_id {
-                                if flushable.contains(&stream_id) {
-                                    active_streams.push(stream_id);
-                                    // Break if the class is not incremental.
-                                    // This is to avoid non-incremental classes
-                                    // sharing bandwidth.
-                                    if !ps.incremental {
-                                        break;
-                                    }
+                        if let Some(stream_id) = ps.stream_id {
+                            if flushable.contains(&stream_id) {
+                                active_streams.push(stream_id);
+                                // Break if the class is not incremental.
+                                // This is to avoid non-incremental classes
+                                // sharing bandwidth.
+                                if !ps.incremental {
+                                    break;
                                 }
                             }
                         } else {
