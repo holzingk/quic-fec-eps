@@ -9,7 +9,7 @@ pub use decoder::Decoder;
 pub use encoder::{Encoder, SymbolKind, ReliabilityLevel, EncodingStats};
 pub use error::FecError;
 
-pub use symbol::Symbol;
+pub use symbol::{Symbol, RepairSymbol};
 
 use std::mem::MaybeUninit;
 

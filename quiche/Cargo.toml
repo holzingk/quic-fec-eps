@@ -83,6 +83,11 @@ winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef", "ws2tc
 mio = { version = "0.8", features = ["net", "os-poll"] }
 url = "1"
 rand = "0.8.5"
+criterion = "0.5.1"
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
+
+[[bench]]
+name = "fec"
+harness = false
