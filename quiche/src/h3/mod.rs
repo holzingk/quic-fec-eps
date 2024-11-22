@@ -329,8 +329,9 @@ const PRIORITY_URGENCY_OFFSET: u8 = 124;
 // Parameter values as specified in [Extensible Priorities].
 //
 // [Extensible Priorities]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
-const PRIORITY_URGENCY_LOWER_BOUND: u8 = 0;
-const PRIORITY_URGENCY_UPPER_BOUND: u8 = 7;
+pub(crate) const PRIORITY_URGENCY_LOWER_BOUND: u8 = 0;
+
+pub(crate) const PRIORITY_URGENCY_UPPER_BOUND: u8 = 7;
 const PRIORITY_URGENCY_DEFAULT: u8 = 3;
 const PRIORITY_INCREMENTAL_DEFAULT: bool = false;
 
@@ -917,7 +918,7 @@ impl TryFrom<&[u8]> for Priority {
     ///
     /// [Extensible Priorities]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     fn try_from(value: &[u8]) -> std::result::Result<Self, Self::Error> {
-        trace!("Unparsed EPS field value = {:?}", value);
+        debug!("Unparsed EPS field value = {:?}", value);
 
         let dict =
             match sfv::Parser::parse_dictionary(value) {
@@ -1654,10 +1655,7 @@ impl Connection {
         let control_stream_id =
             self.control_stream_id.ok_or(Error::FrameUnexpected)?;
 
-        let urgency = priority
-	    .0[0]
-            .urgency
-            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND);
+        let urgency = priority.0[0].urgency;
 
         let mut field_value = format!("u={urgency}");
 

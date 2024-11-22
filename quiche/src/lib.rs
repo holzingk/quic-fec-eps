@@ -5198,7 +5198,21 @@ impl Connection {
         }
 
         // Modify the stream's urgency, if necessary.
-        stream.urgency = priority.0[0].urgency;
+        // Ensure the urgency is clamped to 0-7.
+
+        debug!("Reprioritizing stream {stream_id} to {}", priority.0[0].urgency);
+
+        let clamped_urgency = match priority.0[0].urgency {
+            u if u < h3::PRIORITY_URGENCY_LOWER_BOUND => {
+                h3::PRIORITY_URGENCY_LOWER_BOUND
+            },
+            u if u > h3::PRIORITY_URGENCY_UPPER_BOUND => {
+                h3::PRIORITY_URGENCY_UPPER_BOUND
+            },
+            u => u,
+        };
+
+        stream.urgency = clamped_urgency;
         stream.incremental = priority.0[0].incremental;
         stream.weight = priority.0[0].weight;
         stream.burst_loss_tolerance = priority.0[0].burst_loss_tolerance;
@@ -5206,7 +5220,7 @@ impl Connection {
         stream.repair_delay_tolerance = priority.0[0].repair_delay_tolerance;
 
         let new_priority_key = Arc::new(StreamPriorityKey {
-            urgency: stream.urgency,
+            urgency: clamped_urgency,
             incremental: stream.incremental,
             weight: stream.weight,
             burst_loss_tolerance: stream.burst_loss_tolerance,
@@ -5234,7 +5248,7 @@ impl Connection {
 
             let leaf = hierarchy.mut_class(*leaf_id);
 
-            leaf.urgency = priority.0[0].urgency;
+            leaf.urgency = clamped_urgency;
             leaf.incremental = priority.0[0].incremental;
             leaf.weight = priority.0[0].weight;
             leaf.burst_loss_tolerance = priority.0[0].burst_loss_tolerance;
@@ -7198,6 +7212,17 @@ impl Connection {
     fn get_or_create_stream(
         &mut self, id: u64, local: bool, priority: &mut Priority,
     ) -> Result<&mut stream::Stream> {
+        // Clamp urgency
+        let urgency = priority.0[0].urgency;
+
+        debug!("Creating stream {} with urgency={}", id, urgency);
+
+        if urgency < h3::PRIORITY_URGENCY_LOWER_BOUND {
+            priority.0[0].urgency = h3::PRIORITY_URGENCY_LOWER_BOUND;
+        } else if urgency > h3::PRIORITY_URGENCY_UPPER_BOUND {
+            priority.0[0].urgency = h3::PRIORITY_URGENCY_UPPER_BOUND;
+        }
+
         // Determine minimum path MTU
         let mtu: usize = self
             .path_stats()
@@ -7229,6 +7254,7 @@ impl Connection {
                 if let Some(sid) = class {
                     if sid == id {
                         // Stream has already been added to the hierarchy.
+                        debug!("Stream {id} was already in the hierarchy. Not adding.");
                         return result
                     }
                 }
@@ -13796,48 +13822,48 @@ mod tests {
         let out = [b'b'; 400];
 
         // Server prioritizes streams as follows:
-        //  * Stream 8 and 16 have the same priority but are non-incremental.
-        //  * Stream 4, 12 and 20 have the same priority but 20 is non-incremental
+        //  * Stream 8 and 16 have the same priority (u = 5) but are non-incremental.
+        //  * Stream 4, 12 and 20 have the same priority (u = 6) but 20 is non-incremental
         //    and 4 and 12 are incremental.
-        //  * Stream 0 is on its own.
+        //  * Stream 0 is on its own. (u = 7)
 
         pipe.server.stream_recv(0, &mut b).unwrap();
-        let mut priority = Priority::new(255, true);
+        let mut priority = Priority::new(7, true);
         assert_eq!(pipe.server.stream_priority(0, &mut priority), Ok(()));
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
         pipe.server.stream_send(0, &out, false).unwrap();
 
         pipe.server.stream_recv(12, &mut b).unwrap();
-        let mut priority = Priority::new(42, true);
+        let mut priority = Priority::new(6, true);
         assert_eq!(pipe.server.stream_priority(12, &mut priority), Ok(()));
         pipe.server.stream_send(12, &out, false).unwrap();
         pipe.server.stream_send(12, &out, false).unwrap();
         pipe.server.stream_send(12, &out, false).unwrap();
 
         pipe.server.stream_recv(16, &mut b).unwrap();
-        let mut priority = Priority::new(10, false);
+        let mut priority = Priority::new(5, false);
         assert_eq!(pipe.server.stream_priority(16, &mut priority), Ok(()));
         pipe.server.stream_send(16, &out, false).unwrap();
         pipe.server.stream_send(16, &out, false).unwrap();
         pipe.server.stream_send(16, &out, false).unwrap();
 
         pipe.server.stream_recv(4, &mut b).unwrap();
-        let mut priority = Priority::new(42, true);
+        let mut priority = Priority::new(6, true);
         assert_eq!(pipe.server.stream_priority(4, &mut priority), Ok(()));
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();
         pipe.server.stream_send(4, &out, false).unwrap();
 
         pipe.server.stream_recv(8, &mut b).unwrap();
-        let mut priority = Priority::new(10, false);
+        let mut priority = Priority::new(5, false);
         assert_eq!(pipe.server.stream_priority(8, &mut priority), Ok(()));
         pipe.server.stream_send(8, &out, false).unwrap();
         pipe.server.stream_send(8, &out, false).unwrap();
         pipe.server.stream_send(8, &out, false).unwrap();
 
         pipe.server.stream_recv(20, &mut b).unwrap();
-        let mut priority = Priority::new(42, false);
+        let mut priority = Priority::new(6, false);
         assert_eq!(pipe.server.stream_priority(20, &mut priority), Ok(()));
         pipe.server.stream_send(20, &out, false).unwrap();
         pipe.server.stream_send(20, &out, false).unwrap();
@@ -14017,27 +14043,27 @@ mod tests {
         let mut b = [0; 1];
 
         pipe.server.stream_recv(0, &mut b).unwrap();
-        let mut priority = Priority::new(255, true);
+        let mut priority = Priority::new(7, true);
         assert_eq!(pipe.server.stream_priority(0, &mut priority), Ok(()));
         pipe.server.stream_send(0, b"b", false).unwrap();
 
         pipe.server.stream_recv(12, &mut b).unwrap();
-        let mut priority = Priority::new(42, true);
+        let mut priority = Priority::new(6, true);
         assert_eq!(pipe.server.stream_priority(12, &mut priority), Ok(()));
         pipe.server.stream_send(12, b"b", false).unwrap();
 
         pipe.server.stream_recv(8, &mut b).unwrap();
-        let mut priority = Priority::new(10, true);
+        let mut priority = Priority::new(4, true);
         assert_eq!(pipe.server.stream_priority(8, &mut priority), Ok(()));
         pipe.server.stream_send(8, b"b", false).unwrap();
 
         pipe.server.stream_recv(4, &mut b).unwrap();
-        let mut priority = Priority::new(42, true);
+        let mut priority = Priority::new(6, true);
         assert_eq!(pipe.server.stream_priority(4, &mut priority), Ok(()));
         pipe.server.stream_send(4, b"b", false).unwrap();
 
         // Stream 0 is re-prioritized!!!
-        let mut priority = Priority::new(20, true);
+        let mut priority = Priority::new(5, true);
         assert_eq!(pipe.server.stream_priority(0, &mut priority), Ok(()));
 
         // First is stream 8.

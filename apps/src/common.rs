@@ -1712,7 +1712,7 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
-        debug!("{} stream {} is writable", conn.trace_id(), stream_id);
+        trace!("{} stream {} is writable", conn.trace_id(), stream_id);
 
         if !partial_responses.contains_key(&stream_id) {
             return;
