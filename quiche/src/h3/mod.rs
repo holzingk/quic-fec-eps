@@ -323,9 +323,6 @@ use qlog::events::EventType;
 /// ../struct.Config.html#method.set_application_protos
 pub const APPLICATION_PROTOCOL: &[&[u8]] = &[b"h3"];
 
-// The offset used when converting HTTP/3 urgency to quiche urgency.
-const PRIORITY_URGENCY_OFFSET: u8 = 124;
-
 // Parameter values as specified in [Extensible Priorities].
 //
 // [Extensible Priorities]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
@@ -1291,13 +1288,7 @@ impl Connection {
             return Err(Error::FrameUnexpected);
         }
 
-        // Clamp and shift urgency into quiche-priority space
-        let urgency = priority
-	    .0[0]
-            .urgency
-            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
-            PRIORITY_URGENCY_OFFSET;
-
+        let urgency = priority.0[0].urgency;
         priority.0[0].urgency = urgency;
 
         conn.stream_priority(stream_id, &priority)?;

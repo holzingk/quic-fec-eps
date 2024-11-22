@@ -5179,6 +5179,9 @@ impl Connection {
     ) -> Result<()> {
         // Get existing stream or create a new one, but if the stream
         // has already been closed and collected, ignore the prioritization.
+
+        debug!("Calling stream_priority for stream {} with u={:?}", stream_id, priority.0[0].urgency);
+
         let stream = match self.get_or_create_stream(stream_id, true, &mut Priority::default()) {
             Ok(v) => v,
 
@@ -7431,6 +7434,7 @@ impl Connection {
                 // Note that it makes it impossible to check if the frame is
                 // illegal, since we have no state, but since we ignore the
                 // frame, it should be fine.
+                debug!("skibidi for stream {stream_id}");
                 let stream = match self.get_or_create_stream(stream_id, false, &mut Priority::default()) {
                     Ok(v) => v,
 
