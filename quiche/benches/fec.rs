@@ -17,8 +17,6 @@ enum SendSymbol {
     Source((u64, Vec<u8>)),
     Repair(RepairSymbol),
 }
-use std::time::Instant;
-
 
 fn gen_random_vec(min_len: usize, max_len: usize) -> Vec<u8> {
     let mut rng = rand::thread_rng();
@@ -30,7 +28,7 @@ fn gen_random_vec(min_len: usize, max_len: usize) -> Vec<u8> {
     res
 }
 
-fn prepare_decoder(num: usize, count_loss: usize) -> (Tetrys, Vec<Vec<u8>>){
+fn prepare_decoder(num: usize, count_loss: usize, loss_at_start: bool) -> (Tetrys, Vec<Vec<u8>>){
     assert!(num > count_loss);
     let mut fec = Tetrys::new(1500).unwrap();
     let mut ss = Vec::new();
@@ -42,10 +40,18 @@ fn prepare_decoder(num: usize, count_loss: usize) -> (Tetrys, Vec<Vec<u8>>){
     let mut out: Vec<SendSymbol> = Vec::new();
     for (i, s) in ss.iter().enumerate() {
 	let sid = fec.encoder.add_source_symbol(s.as_slice()).unwrap();
-	if i < count_loss {
-	    out.push(SendSymbol::Source((sid, s.clone())));
+	if loss_at_start {
+	    if i >= count_loss {
+		out.push(SendSymbol::Source((sid, s.clone())));
+	    } else {
+		missing_sids.push(s.clone());
+	    }
 	} else {
-	    missing_sids.push(s.clone());
+	    if i < count_loss {
+		out.push(SendSymbol::Source((sid, s.clone())));
+	    } else {
+		missing_sids.push(s.clone());
+	    }
 	}
     }
     for _i in 0..count_loss {
@@ -97,16 +103,31 @@ fn tetrys_encode_symbols(fec: &mut Tetrys) {
     let _rs = fec.encoder.generate_repair_symbol().unwrap();
 }
 
-fn bench_decoder_matrix_size(c: &mut Criterion) {
+fn bench_decoder_matrix_size_loss_at_start(c: &mut Criterion) {
     let mut group = c.benchmark_group("decoder_matrix");
     for size in (10_usize..2500_usize).step_by(10) {
 	// about 5 percent loss
 	let loss = size.div_ceil(20_usize);
 	group.throughput(Throughput::Elements(size as u64));
 	group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
-	    b.iter_batched_ref(|| prepare_decoder(size, loss),
+	    b.iter_batched_ref(|| prepare_decoder(size, loss, true),
 			       |(ref mut fec,  missing_sids)| tetrys_decode(fec, &missing_sids),
-			       BatchSize::SmallInput)
+			       BatchSize::PerIteration)
+	});
+    }
+    group.finish();
+}
+
+fn bench_decoder_matrix_size_loss_at_end(c: &mut Criterion) {
+    let mut group = c.benchmark_group("decoder_matrix");
+    for size in (10_usize..2500_usize).step_by(10) {
+	// about 5 percent loss
+	let loss = size.div_ceil(20_usize);
+	group.throughput(Throughput::Elements(size as u64));
+	group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+	    b.iter_batched_ref(|| prepare_decoder(size, loss, false),
+			       |(ref mut fec,  missing_sids)| tetrys_decode(fec, &missing_sids),
+			       BatchSize::PerIteration)
 	});
     }
     group.finish();
@@ -119,11 +140,11 @@ fn bench_encoder_matrix_size(c: &mut Criterion) {
 	group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
 	    b.iter_batched_ref(|| prepare_encoder(size),
 			       |mut fec| tetrys_encode_symbols(&mut fec),
-			       BatchSize::SmallInput)
+			       BatchSize::PerIteration)
 	});
     }
     group.finish();
 }
 
-criterion_group!(benches, bench_decoder_matrix_size, bench_encoder_matrix_size);
+criterion_group!(benches, bench_decoder_matrix_size_loss_at_start, bench_decoder_matrix_size_loss_at_end, bench_encoder_matrix_size);
 criterion_main!(benches);
