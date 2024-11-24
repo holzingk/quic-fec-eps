@@ -7,6 +7,9 @@ use criterion::{
     Throughput,
     BatchSize,
 };
+
+use pprof::criterion::{Output, PProfProfiler};
+
 use quiche::fec::{
     Tetrys,
     RepairSymbol,
@@ -105,7 +108,7 @@ fn tetrys_encode_symbols(fec: &mut Tetrys) {
 
 fn bench_decoder_matrix_size_loss_at_start(c: &mut Criterion) {
     let mut group = c.benchmark_group("Decoding with loss at begin");
-    for size in (10_usize..2500_usize).step_by(10) {
+    for size in (300_usize..310_usize).step_by(10) {
 	// about 5 percent loss
 	let loss = size.div_ceil(20_usize);
 	group.throughput(Throughput::Elements(size as u64));
@@ -120,7 +123,7 @@ fn bench_decoder_matrix_size_loss_at_start(c: &mut Criterion) {
 
 fn bench_decoder_matrix_size_loss_at_end(c: &mut Criterion) {
     let mut group = c.benchmark_group("Decoding with loss at end");
-    for size in (10_usize..2500_usize).step_by(10) {
+    for size in (300_usize..310_usize).step_by(10) {
 	// about 5 percent loss
 	let loss = size.div_ceil(20_usize);
 	group.throughput(Throughput::Elements(size as u64));
@@ -135,7 +138,7 @@ fn bench_decoder_matrix_size_loss_at_end(c: &mut Criterion) {
 
 fn bench_encoder_matrix_size(c: &mut Criterion) {
     let mut group = c.benchmark_group("Encoding of one repair symbol");
-    for size in (10..2500).step_by(10) {
+    for size in (300..310).step_by(10) {
 	group.throughput(Throughput::Elements(size as u64));
 	group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
 	    b.iter_batched_ref(|| prepare_encoder(size),
@@ -146,5 +149,9 @@ fn bench_encoder_matrix_size(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_decoder_matrix_size_loss_at_start, bench_decoder_matrix_size_loss_at_end, bench_encoder_matrix_size);
+criterion_group!(
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = bench_decoder_matrix_size_loss_at_start, bench_decoder_matrix_size_loss_at_end, bench_encoder_matrix_size
+);
 criterion_main!(benches);
