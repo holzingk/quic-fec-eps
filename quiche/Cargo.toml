@@ -75,6 +75,7 @@ aligned-vec = "0.6"
 rand = "0.8.5"
 rand_pcg = "0.3"
 rand_core = { version = "0.6", features = ["getrandom"] }
+gf256 = "0.3.0"
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef", "ws2tcpip"] }

@@ -6,6 +6,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 // use std::time::{Duration, Instant};
 use std::cmp;
 
+use std::convert::TryInto;
+use ::gf256::*;
+
 use rand::prelude::*;
 //use rand::{thread_rng, Rng};
 //use rand_core::RngCore;
@@ -550,13 +553,20 @@ impl Decoder {
 			)
                     );
                     // multiplication is bitwise XOR
-                    let factor = self.gf.multiply_u8(
-			matrix[i].get_coefficients_mut(
-                            smallest_sid,
-                            largest_sid,
-			)[k],
-			inv_pivot,
-                    );
+		    let factor = (
+			gf256(
+			    matrix[i].get_coefficients_mut(
+				smallest_sid,
+				largest_sid)[k]) *
+			    gf256(inv_pivot)
+		    ).try_into().unwrap();
+                    // let factor = self.gf.multiply_u8(
+		    // 	matrix[i].get_coefficients_mut(
+                    //         smallest_sid,
+                    //         largest_sid,
+		    // 	)[k],
+		    // 	inv_pivot,
+                    // );
                     trace!("Factor {factor}");
                     // h < i we cannot borrow two entries of the matrix vector as mut, so it gets ugly here
                     let (above_pivot, below_pivot) =
