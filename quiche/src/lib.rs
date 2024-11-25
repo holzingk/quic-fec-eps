@@ -3625,11 +3625,13 @@ impl Connection {
                     },
 
 		    // Inform FEC about detected symbol loss
-                    frame::Frame::SourceSymbolHeader { fec_session, sid, .. } => {
+                    frame::Frame::SourceSymbol {fec_session, sid} | frame::Frame::SourceSymbolHeader { fec_session, sid, .. } => {
 			trace!("Informing encoder of fec session {fec_session} about loss of Source Symbol {sid}");
-			if self.fec.get_mut(&fec_session).map(|tetrys| tetrys.encoder.on_detected_loss()).is_none() {
-			    warn!("Detected loss of unknown fec session {fec_session}");
-			}
+			if self.fec.get_mut(&fec_session)
+			    .map(|tetrys| tetrys.encoder.on_detected_source_symbol_loss(sid))
+			    .is_none() {
+				warn!("Detected loss of unknown fec session {fec_session}");
+			    }
 		    },
 
 		    frame::Frame::Repair { fec_session, smallest_sid, highest_sid, .. }  => {
@@ -3637,7 +3639,6 @@ impl Connection {
 			if self.fec.get_mut(&fec_session).map(|tetrys| tetrys.encoder.on_detected_loss()).is_none() {
 			    warn!("Detected loss of unknown fec session {fec_session}");
 			}
-
 		    }
 
 		    // Ignore the rest
@@ -4384,43 +4385,47 @@ impl Connection {
 	    !is_closing && path.active()
 	{
 	    for (fec_session, tetrys) in self.fec.iter_mut() {
-		if tetrys.encoder.should_send_next() == SymbolKind::Repair {
+		match tetrys.encoder.should_send_next() {
+		    SymbolKind::Repair => {
+			let rs = tetrys.encoder
+			    .generate_repair_symbol()
+			    .expect("If we should send, it must be able to generate");
 
-		    let rs = tetrys.encoder
-			.generate_repair_symbol()
-			.expect("If we should send, it must be able to generate");
-
-		    let len = tetrys.encoder.get_repair_symbol_len();
-		    let highest_sid = rs.get_largest_symbol_id();
-		    let repair_frame = frame::Frame::Repair {
-			fec_session: *fec_session,
-			smallest_sid: rs.get_smallest_symbol_id(),
-			highest_sid,
-			seed: rs.get_seed() as u64,
-			len: len as u64,
-			data: rs.get_payload_aligned_as_ref()[..len].to_vec(),
-		    };
-		    if repair_frame.wire_len() < left && frames.len() < 2 {
-			trace!("{} Pushing repair frame to packet: smallest_sid {}, highest_sid {}, seed {}, len {}",
-			       self.trace_id,
-			       rs.get_smallest_symbol_id(),
-			       rs.get_largest_symbol_id(),
-			       rs.get_seed() as u64,
-			       len);
-			if push_frame_to_pkt!(b, frames, repair_frame, left) {
-			    ack_eliciting = true;
-			    in_flight = true;
-			    tetrys.encoder.put_repair_symbol_in_flight(highest_sid);
+			let len = tetrys.encoder.get_repair_symbol_len();
+			let highest_sid = rs.get_largest_symbol_id();
+			let repair_frame = frame::Frame::Repair {
+			    fec_session: *fec_session,
+			    smallest_sid: rs.get_smallest_symbol_id(),
+			    highest_sid,
+			    seed: rs.get_seed() as u64,
+			    len: len as u64,
+			    data: rs.get_payload_aligned_as_ref()[..len].to_vec(),
+			};
+			if repair_frame.wire_len() < left && frames.len() < 2 {
+			    trace!("{} Pushing repair frame to packet: smallest_sid {}, highest_sid {}, seed {}, len {}",
+				   self.trace_id,
+				   rs.get_smallest_symbol_id(),
+				   rs.get_largest_symbol_id(),
+				   rs.get_seed() as u64,
+				   len);
+			    if push_frame_to_pkt!(b, frames, repair_frame, left) {
+				ack_eliciting = true;
+				in_flight = true;
+				tetrys.encoder.put_repair_symbol_in_flight(highest_sid);
+			    }
+			} else {
+			    trace!("{} Not enough space {left} left for this repair symbol {}", self.trace_id, repair_frame.wire_len());
 			}
-		    } else {
-			trace!("{} Not enough space {left} left for this repair symbol {}", self.trace_id, repair_frame.wire_len());
+		    },
+		    SymbolKind::RetransmittedSource => {
+			let(sid, ss) = get_source_symbol_to_retransmit().expect("Should be available");
+			let len = ss.len();
+			let ss_frame = frame::Frame::SourceSymbol
 		    }
+		    _ => {}
 		}
 	    }
 	}
-
-
-		    
 	
         // The preference of data-bearing frame to include in a packet
         // is managed by `self.emit_dgram`. However, whether any frames

@@ -10,6 +10,8 @@ pub enum SymbolKind {
     Source,
     /// Repair Symbol
     Repair,
+    /// Retransmitted SourceSymbol
+    RetransmittedSource,
 }
 
 /// The desired reliability level
@@ -65,12 +67,25 @@ pub struct Encoder {
     app_limited: bool,
     left_for_tail_protection: u64,
     incremental: bool,
+    lost_ss: VecDeque<u64>,
 }
 
 impl Encoder {
 
+    pub fn on_detected_source_symbol_loss(&mut self, sid: u64) {
+	trace!("SID {sid} is lost");
+	// mark sid lost in lost buffer VecDeque<u64>
+	self.lost_ss.push_back(sid);
+	self.lost += 1;
+    }
+
+    pub fn finalize_retransmitted_source_symbol(&mut self, sid: u64) {
+	self.lost_ss.pop_front().unwrap();
+	self.lost.saturating_sub(1);
+    }
+    
     /// Informs the encoder about a detected lost repair symbol
-    pub fn on_detected_loss(&mut self) {
+    pub fn on_detected_repair_symbol_loss(&mut self) {
 	trace!("Encoder has been notified about loss");
 	self.lost += 1;
     }
@@ -111,6 +126,9 @@ impl Encoder {
 
         /// Returns the kind of symbol that should be sent in the next packet
     pub fn should_send_next(&self) -> SymbolKind {
+	if self.lost_ss.len() > 0 {
+	    return SymbolKind::RetransmittedSource;
+	}
 	// recovery has highest priority
 	if self.lost > 0 {
 	    trace!("Next repair symbol should be sent due to recovery");
@@ -218,6 +236,18 @@ impl Encoder {
         Ok(res)
     }
 
+    /// Returns stored source symbol if available
+    fn get_source_symbol(&self, sid: u64) -> Option<u64, Vec<u8>> {
+	self.sliding_window.make_contiguous().sort_by_key(|ss| ss.source_symbol_id);
+	let Ok(i) = self.sliding_window.binary_search_by_key(&sid, |&ss| ss.source_symbol_id) else { return None };
+	Some(self.sliding_window[i].source_symbol_id,
+	     self.sliding_window[i].get_payload_as_ref().collect())
+    }
+
+    fn get_source_symbol_to_retransmit(&self) -> Option<u64, Vec<u8>> {
+	self.lost_ss.front().and_then(|sid| self.get_source_symbol(sid));
+    }
+
     /// Encodes current symbols of the sliding window (added via [self.make_source_packet]) into a coded packet.
     ///
     /// Decode with [Decoder::decode_packet].
@@ -274,10 +304,9 @@ impl Encoder {
     pub fn handle_ack(&mut self, next_missing_symbol_id: u64) {
 	// remove from in flight sids
         self.sliding_window.retain(
-            |SourceSymbol {
-                 source_symbol_id, ..
-             }| *source_symbol_id >= next_missing_symbol_id,
-        );
+            |SourceSymbol { source_symbol_id, .. }| {
+		*source_symbol_id >= next_missing_symbol_id
+	    });
 	// remove all in flight rids protecting only smaller sids
 	self.in_flight_rs.retain(|&sid, _count| sid >= next_missing_symbol_id);
     }
