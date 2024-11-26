@@ -3625,7 +3625,7 @@ impl Connection {
                     },
 
 		    // Inform FEC about detected symbol loss
-                    frame::Frame::SourceSymbol {fec_session, sid} | frame::Frame::SourceSymbolHeader { fec_session, sid, .. } => {
+                    frame::Frame::SourceSymbol {fec_session, sid, .. } | frame::Frame::SourceSymbolHeader { fec_session, sid, .. } => {
 			trace!("Informing encoder of fec session {fec_session} about loss of Source Symbol {sid}");
 			if self.fec.get_mut(&fec_session)
 			    .map(|tetrys| tetrys.encoder.on_detected_source_symbol_loss(sid))
@@ -3636,7 +3636,9 @@ impl Connection {
 
 		    frame::Frame::Repair { fec_session, smallest_sid, highest_sid, .. }  => {
 			trace!("Informing encoder of fec session {fec_session} about loss of Repair Symbol {smallest_sid} - {highest_sid}");
-			if self.fec.get_mut(&fec_session).map(|tetrys| tetrys.encoder.on_detected_loss()).is_none() {
+			if self.fec.get_mut(&fec_session)
+			    .map(|tetrys| tetrys.encoder.on_detected_repair_symbol_loss())
+			    .is_none() {
 			    warn!("Detected loss of unknown fec session {fec_session}");
 			}
 		    }
@@ -4418,10 +4420,25 @@ impl Connection {
 			}
 		    },
 		    SymbolKind::RetransmittedSource => {
-			let(sid, ss) = get_source_symbol_to_retransmit().expect("Should be available");
-			let len = ss.len();
-			let ss_frame = frame::Frame::SourceSymbol
-		    }
+			let(sid, ss_payload) = tetrys.encoder.get_source_symbol_to_retransmit().expect("Should be available");
+			let ss_frame = frame::Frame::SourceSymbol {
+			    fec_session: *fec_session,
+			    sid: sid,
+			    length: ss_payload.len() as u64,
+			    fec_protected_payload: ss_payload
+			};
+			if ss_frame.wire_len() < left && frames.len() < 2 {
+			    trace!("{} Pushing retransmitted source symbol, fec_session {fec_session}, sid {sid}",
+				   self.trace_id);
+			    if push_frame_to_pkt!(b, frames, ss_frame, left) {
+				ack_eliciting = true;
+				in_flight = true;
+				tetrys.encoder.put_retransmitted_source_symbol_in_flight(sid);
+			    }
+			} else {
+			    trace!("{} Not enough space {left} left for this source symbol {}", self.trace_id, ss_frame.wire_len());
+			}
+		    },
 		    _ => {}
 		}
 	    }
@@ -7268,7 +7285,8 @@ impl Connection {
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
         let send_path = self.paths.get(send_pid)?;
-	let repair_symbol_outstanding = self.fec.iter().any(|(_, tetrys)| tetrys.encoder.should_send_next() == SymbolKind::Repair);
+	let repair_symbol_outstanding = self.fec.iter().any(|(_, tetrys)| tetrys.encoder.should_send_next() == SymbolKind::Repair) ||
+	    self.fec.iter().any(|(_, tetrys)| tetrys.encoder.should_send_next() == SymbolKind::RetransmittedSource);
         if (self.is_established() || self.is_in_early_data()) &&
             (self.should_send_handshake_done() ||
                 self.almost_full ||

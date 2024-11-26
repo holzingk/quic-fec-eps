@@ -758,9 +758,13 @@ impl Frame {
 	    } => {},
 	    
 	    Frame::SourceSymbol {
-		..
+		fec_session,
+		sid,
+		length,
+		fec_protected_payload
 	    } => {
-		unimplemented!();
+		encode_source_symbol_header(*fec_session, *sid, (*length) as usize, b)?;
+		b.put_bytes(fec_protected_payload.as_ref())?;
 	    },
 
 	    Frame::SymbolAck {
@@ -1064,7 +1068,7 @@ impl Frame {
 		length,
 		fec_protected_payload: _,
 	    } => {
-		4 + // frame type
+		8 + // frame type
 		    octets::varint_len(*fec_session) + 
 		    octets::varint_len(*sid) +
 		    2 + //always 2 byte varint

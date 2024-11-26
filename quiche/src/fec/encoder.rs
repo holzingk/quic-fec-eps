@@ -2,6 +2,7 @@ use super::error::FecError;
 use super::symbol::{RepairSymbol, SourceSymbol};
 use super::{FecConfig, Gf};
 use std::collections::{VecDeque, BTreeMap};
+use super::symbol::Symbol;
 
 /// The kind of the symbol
 #[derive(Debug, PartialEq)]
@@ -79,9 +80,10 @@ impl Encoder {
 	self.lost += 1;
     }
 
-    pub fn finalize_retransmitted_source_symbol(&mut self, sid: u64) {
-	self.lost_ss.pop_front().unwrap();
-	self.lost.saturating_sub(1);
+    pub fn put_retransmitted_source_symbol_in_flight(&mut self, sid: u64) {
+	let popped_sid = self.lost_ss.pop_front().unwrap();
+	assert_eq!(popped_sid, sid);
+	self.lost = self.lost.saturating_sub(1);
     }
     
     /// Informs the encoder about a detected lost repair symbol
@@ -126,12 +128,12 @@ impl Encoder {
 
         /// Returns the kind of symbol that should be sent in the next packet
     pub fn should_send_next(&self) -> SymbolKind {
-	if self.lost_ss.len() > 0 {
-	    return SymbolKind::RetransmittedSource;
-	}
 	// recovery has highest priority
 	if self.lost > 0 {
 	    trace!("Next repair symbol should be sent due to recovery");
+	    if self.lost_ss.len() > 0 && self.buffered_symbols() > 0 && self.reliability_level == ReliabilityLevel::RecoveryOnly {
+		return SymbolKind::RetransmittedSource;
+	    }
 	    if self.buffered_symbols() > 0 {
 		return SymbolKind::Repair;
 	    } else {
@@ -206,6 +208,7 @@ impl Encoder {
 	    app_limited: true,
 	    left_for_tail_protection: 0,
 	    incremental: true,
+	    lost_ss: VecDeque::new(),
         })
     }
 
@@ -236,16 +239,18 @@ impl Encoder {
         Ok(res)
     }
 
-    /// Returns stored source symbol if available
-    fn get_source_symbol(&self, sid: u64) -> Option<u64, Vec<u8>> {
+    /// Returns the source symbol sid and payload stored for this sid if available
+    fn get_source_symbol(&mut self, sid: u64) -> Option<(u64, Vec<u8>)> {
 	self.sliding_window.make_contiguous().sort_by_key(|ss| ss.source_symbol_id);
-	let Ok(i) = self.sliding_window.binary_search_by_key(&sid, |&ss| ss.source_symbol_id) else { return None };
-	Some(self.sliding_window[i].source_symbol_id,
-	     self.sliding_window[i].get_payload_as_ref().collect())
+	let Ok(i) = self.sliding_window.binary_search_by_key(&sid, |ss| ss.source_symbol_id) else { return None };
+	Some((self.sliding_window[i].source_symbol_id,
+	     self.sliding_window[i].get_payload_as_ref().iter().cloned().collect()))
     }
 
-    fn get_source_symbol_to_retransmit(&self) -> Option<u64, Vec<u8>> {
-	self.lost_ss.front().and_then(|sid| self.get_source_symbol(sid));
+    /// Returns next source symbol to retransmit
+    pub fn get_source_symbol_to_retransmit(&mut self) -> Option<(u64, Vec<u8>)> {
+	let Some(missing_sid) = self.lost_ss.front() else { return None };
+	self.get_source_symbol(*missing_sid)
     }
 
     /// Encodes current symbols of the sliding window (added via [self.make_source_packet]) into a coded packet.
