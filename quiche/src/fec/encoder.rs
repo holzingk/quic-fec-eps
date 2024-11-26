@@ -130,11 +130,12 @@ impl Encoder {
     pub fn should_send_next(&self) -> SymbolKind {
 	// recovery has highest priority
 	if self.lost > 0 {
-	    trace!("Next repair symbol should be sent due to recovery");
-	    if self.lost_ss.len() > 0 && self.buffered_symbols() > 0 && self.reliability_level == ReliabilityLevel::RecoveryOnly {
+	    if self.lost_ss.len() > 0 && self.buffered_symbols() > 0 && !self.incremental {
+		trace!("Next source symbol should be sent due to retransmission based recovery");
 		return SymbolKind::RetransmittedSource;
 	    }
 	    if self.buffered_symbols() > 0 {
+		trace!("Next repair symbol should be sent due to recovery");
 		return SymbolKind::Repair;
 	    } else {
 		trace!("Cannot send as symbol buffer is empty");
@@ -207,7 +208,7 @@ impl Encoder {
 	    recovered: 0,
 	    app_limited: true,
 	    left_for_tail_protection: 0,
-	    incremental: true,
+	    incremental: false,
 	    lost_ss: VecDeque::new(),
         })
     }
