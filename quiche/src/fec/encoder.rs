@@ -242,15 +242,27 @@ impl Encoder {
     /// Returns the source symbol sid and payload stored for this sid if available
     fn get_source_symbol(&mut self, sid: u64) -> Option<(u64, Vec<u8>)> {
 	self.sliding_window.make_contiguous().sort_by_key(|ss| ss.source_symbol_id);
-	let Ok(i) = self.sliding_window.binary_search_by_key(&sid, |ss| ss.source_symbol_id) else { return None };
+	let Ok(i) = self.sliding_window.binary_search_by_key(&sid, |ss| ss.source_symbol_id) else {
+	    trace!("Could not find sid {sid} in sliding window");
+	    return None;
+	};
 	Some((self.sliding_window[i].source_symbol_id,
 	     self.sliding_window[i].get_payload_as_ref().iter().cloned().collect()))
     }
 
     /// Returns next source symbol to retransmit
     pub fn get_source_symbol_to_retransmit(&mut self) -> Option<(u64, Vec<u8>)> {
-	let Some(missing_sid) = self.lost_ss.front() else { return None };
-	self.get_source_symbol(*missing_sid)
+	let Some(missing_sid) = self.lost_ss.front() else {
+	    trace!("Nothing to retransmit");
+	    return None;
+	};
+	match self.get_source_symbol(*missing_sid) {
+	    None => {
+		_ = self.lost_ss.pop_front();
+		None
+	    }
+	    ok => ok
+	}
     }
 
     /// Encodes current symbols of the sliding window (added via [self.make_source_packet]) into a coded packet.

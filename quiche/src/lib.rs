@@ -4419,8 +4419,11 @@ impl Connection {
 			    trace!("{} Not enough space {left} left for this repair symbol {}", self.trace_id, repair_frame.wire_len());
 			}
 		    },
-		    SymbolKind::RetransmittedSource => {
-			let(sid, ss_payload) = tetrys.encoder.get_source_symbol_to_retransmit().expect("Should be available");
+		    SymbolKind::RetransmittedSource => 'retranssource: {
+			let Some((sid, ss_payload)) = tetrys.encoder.get_source_symbol_to_retransmit() else {
+			    trace!("no source symbol found, so it should already be available at receiver, e.g. via symbol ack");
+			    break 'retranssource;
+			};
 			let ss_frame = frame::Frame::SourceSymbol {
 			    fec_session: *fec_session,
 			    sid: sid,
