@@ -1291,7 +1291,7 @@ impl Connection {
         let urgency = priority.0[0].urgency;
         priority.0[0].urgency = urgency;
 
-        conn.stream_priority(stream_id, &priority)?;
+        conn.stream_priority(stream_id, priority)?;
 
         self.send_headers(conn, stream_id, headers, fin)?;
         Ok(())
@@ -1952,8 +1952,8 @@ impl Connection {
 
             // Anything else is a GREASE stream, so make it the least important.
             _ => {
-                let priority = Priority::new(255, false);
-                conn.stream_priority(stream_id, &priority)?;
+                let mut priority = Priority::new(255, false);
+                conn.stream_priority(stream_id, &mut priority)?;
             },
         }
 

@@ -414,7 +414,6 @@ use std::str::FromStr;
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use itertools::Itertools;
 use smallvec::SmallVec;
 use crate::h3::Priority;
 
@@ -4417,6 +4416,8 @@ impl Connection {
                 // Use the flushable streams to determine which streams to use in this round.
                 let hls_round = scheduler.backlogged_classes_from_hierarchy(flushable);
                 scheduler.init_round(hls_round);
+
+                debug!("Starting round with hierarchy: {:?}", scheduler.hierarchy);
             }
 
             // Visit the class being pointed at by round-robin.
@@ -5175,35 +5176,26 @@ impl Connection {
     /// The target stream is created if it did not exist before calling this
     /// method.
     pub fn stream_priority(
-        &mut self, stream_id: u64, priority: &Priority
+        &mut self, stream_id: u64, priority: &mut Priority
     ) -> Result<()> {
         // Get existing stream or create a new one, but if the stream
         // has already been closed and collected, ignore the prioritization.
-
         debug!("Calling stream_priority for stream {} with u={:?}", stream_id, priority.0[0].urgency);
 
-        let stream = match self.get_or_create_stream(stream_id, true, &mut Priority::default()) {
-            Ok(v) => v,
+        let stream = match self.get_or_create_stream(stream_id, true, priority) {
+            Ok(v) => {
+                debug!("Successfully created stream {stream_id}");
+                v
+            },
 
             Err(Error::Done) => return Ok(()),
 
             Err(e) => return Err(e),
         };
 
-        if  stream.urgency == priority.0[0].urgency &&
-            stream.incremental == priority.0[0].incremental &&
-            stream.weight == priority.0[0].weight &&
-            stream.burst_loss_tolerance == priority.0[0].burst_loss_tolerance &&
-            stream.protection_ratio == priority.0[0].protection_ratio &&
-            stream.repair_delay_tolerance == priority.0[0].repair_delay_tolerance
-        {
-            return Ok(());
-        }
-
         // Modify the stream's urgency, if necessary.
         // Ensure the urgency is clamped to 0-7.
-
-        debug!("Reprioritizing stream {stream_id} to {}", priority.0[0].urgency);
+        debug!("Reprioritizing stream {stream_id} to u={}", priority.0[0].urgency);
 
         let clamped_urgency = match priority.0[0].urgency {
             u if u < h3::PRIORITY_URGENCY_LOWER_BOUND => {
@@ -5239,25 +5231,44 @@ impl Connection {
         self.streams
             .update_priority(&old_priority_key, &new_priority_key);
 
-        // Find this stream in the hierarchy and update it, too.
+        let mtu = self
+            .path_stats()
+            .map(|s| s.pmtu)
+            .max()
+            .unwrap_or(1500);
+
+        // Update the hierarchy, too.
         let hierarchy = &mut self.hls_scheduler.hierarchy;
-        let root = hierarchy.root;
-        let leaves = hierarchy.leaf_descendants(root);
 
-        if let Some(leaf_id) = leaves.iter().find_or_first(|l| hierarchy
-            .class(**l)
-            .stream_id
-            .expect("Leaves should have stream IDs!") == stream_id) {
+        // The first (and default) parent is the root; start with it.
+        // The class added last is the leaf.
+        let mut current_parent = hierarchy.root;
 
-            let leaf = hierarchy.mut_class(*leaf_id);
+        // Delete the current stream from the hierarchy.
+        hierarchy.delete_class(stream_id, mtu);
 
-            leaf.urgency = clamped_urgency;
-            leaf.incremental = priority.0[0].incremental;
-            leaf.weight = priority.0[0].weight;
-            leaf.burst_loss_tolerance = priority.0[0].burst_loss_tolerance;
-            leaf.protection_ratio = priority.0[0].protection_ratio;
-            leaf.repair_delay_tolerance = priority.0[0].repair_delay_tolerance;
+        // Reverse priority values (pv) to append exp_p path parameters top-down.
+        for pv in priority.0.iter().rev() {
+            // Insert the path element into the hierarchy and use it as the next parent.
+            current_parent = hierarchy.insert(
+                pv.urgency,
+                pv.incremental,
+                pv.weight,
+                pv.burst_loss_tolerance,
+                pv.protection_ratio,
+                pv.repair_delay_tolerance,
+                Some(current_parent)
+            );
+
+            // Modify the root's capacity
+            hierarchy.capacity += mtu as u64;
         }
+
+        // Convert weights into global guarantees accounting for the new capacity
+        hierarchy.generate_guarantees();
+
+        // Add the stream ID to the node.
+        hierarchy.mut_class(current_parent).stream_id = Some(stream_id);
 
         Ok(())
     }
@@ -7217,7 +7228,6 @@ impl Connection {
     ) -> Result<&mut stream::Stream> {
         // Clamp urgency
         let urgency = priority.0[0].urgency;
-
         debug!("Creating stream {} with urgency={}", id, urgency);
 
         if urgency < h3::PRIORITY_URGENCY_LOWER_BOUND {
@@ -7241,83 +7251,44 @@ impl Connection {
             self.is_server,
         );
 
-        // Now, we modify the HLS hierarchy accordingly.
+        // Now, modify the HLS hierarchy accordingly, but only if we are getting the stream
+        // instead of creating a new one.
         if let Ok(_) = result {
             // Append the stream to the HLS hierarchy
             let hierarchy = &mut self.hls_scheduler.hierarchy;
 
-            // Ensure the stream ID we want to add has not yet been added.
-            let root = hierarchy.root;
+            let added_streams: Vec<u64> = hierarchy.leaf_descendants(hierarchy.root).iter().map(|l| hierarchy.class(*l).stream_id.expect("Leaves must have a stream ID")).collect();
 
-            let leaves = hierarchy.leaf_descendants(root);
+            // If the stream is new, add it to the hierarchy.
+            // Only delete the stream during reprioritization.
+            if !added_streams.contains(&id) {
+                // The first (and default) parent is the root; start with it.
+                // The class added last is the leaf.
+                let mut current_parent = hierarchy.root;
 
-            for leaf in leaves {
-                let class = hierarchy.class(leaf).stream_id;
+                // Reverse priority values (pv) to append exp_p path parameters top-down.
+                for pv in priority.0.iter().rev() {
+                    // Insert the path element into the hierarchy and use it as the next parent.
+                    current_parent = hierarchy.insert(
+                        pv.urgency,
+                        pv.incremental,
+                        pv.weight,
+                        pv.burst_loss_tolerance,
+                        pv.protection_ratio,
+                        pv.repair_delay_tolerance,
+                        Some(current_parent)
+                    );
 
-                if let Some(sid) = class {
-                    if sid == id {
-                        // Stream has already been added to the hierarchy.
-                        debug!("Stream {id} was already in the hierarchy. Not adding.");
-                        return result
-                    }
+                    // Modify the root's capacity
+                    hierarchy.capacity += mtu as u64;
                 }
+
+                // Convert weights into global guarantees accounting for the new capacity
+                hierarchy.generate_guarantees();
+
+                // Add the stream ID to the node.
+                hierarchy.mut_class(current_parent).stream_id = Some(id);
             }
-
-            // The first (and default) parent is the root; start with it.
-            // The class added last is the leaf.
-            let mut current_parent = hierarchy.root;
-
-            // Reverse priority values (pv) to append exp_p path parameters top-down.
-            for pv in priority.0.iter().rev() {
-                if let Some(id) = pv.id.clone() {
-                    if hierarchy.eps_id_to_hls_id.contains_key(&id) {
-                        // Class has already been added.
-                        // Use it as the parent in the next iteration.
-                        current_parent = *hierarchy.eps_id_to_hls_id.get(&id).unwrap();
-
-                        trace!("Updating values for existing class {:?} (HLS id={:?})",
-                                    id, current_parent);
-
-                        // Overwrite its pre-existing values.
-                        let internal_class = hierarchy.mut_class(current_parent);
-
-                        internal_class.weight = pv.weight;
-                        internal_class.urgency = pv.urgency;
-                        internal_class.incremental = pv.incremental;
-                        internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
-                        internal_class.protection_ratio = pv.protection_ratio;
-                        internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
-
-                        continue
-                    }
-                }
-
-                // Insert the path element into the hierarchy and use it as the next parent.
-                current_parent = hierarchy.insert(
-                    pv.urgency,
-                    pv.incremental,
-                    pv.weight,
-                    pv.burst_loss_tolerance,
-                    pv.protection_ratio,
-                    pv.repair_delay_tolerance,
-                    Some(current_parent)
-                );
-
-                // Leaves don't have an eps_p ID.
-                // For new internal EPS IDs, store the generated class ID
-                if let Some(id) = pv.id.clone() {
-                    hierarchy.eps_id_to_hls_id.insert(id, current_parent);
-                }
-
-                // Modify the root's capacity
-                hierarchy.capacity += mtu as u64;
-            }
-
-            // Convert weights into global guarantees accounting for the new capacity
-            hierarchy.generate_guarantees();
-
-            // Add the stream ID to the node.
-            hierarchy.mut_class(current_parent).stream_id = Some(id);
         }
 
         result

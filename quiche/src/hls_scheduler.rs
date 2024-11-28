@@ -65,9 +65,6 @@ pub struct HLSHierarchy {
     /// Map of class identifiers to class objects.
     pub(crate) classes: HashMap<u64, HLSClass>,
 
-    /// Associates an EPS id with a class ID used by the HLS scheduler.
-    pub eps_id_to_hls_id: HashMap<String, u64>,
-
     /// Identifier of the root class.
     pub root: u64,
 
@@ -134,18 +131,23 @@ impl HLSHierarchy {
         // Find the leaf with the corresponding stream ID
         if let Some(class_id) = leaves.iter().find_or_first(|l| self.class(**l).stream_id == Option::from(stream_id)) {
             let mut class = self.class(*class_id);
+            let mut child_id = *class_id;
 
             // Remove children bottom-up
             while let Some(parent_id) = class.parent {
+                // Get the parent of the child
                 let parent_class = self.mut_class(parent_id);
-                parent_class.children.remove(class_id);
 
+                // Remove the child
+                parent_class.children.remove(&child_id);
+
+                // Keep track of how much to decrease the capacity later
+                capacity_decrease += mtu as u64;
+
+                // If the parent has no children left, continue removing classes.
                 if parent_class.children.is_empty() {
-                    // No children left, remove this class now too
+                    child_id = parent_id;
                     class = parent_class;
-
-                    // Reduce the capacity.
-                    capacity_decrease += mtu as u64;
                 } else {
                     break;
                 }
@@ -251,7 +253,6 @@ impl HLSHierarchy {
         let root = 0;
         let mut hierarchy = HLSHierarchy {
             classes: HashMap::new(),
-            eps_id_to_hls_id: HashMap::new(),
             root,
             capacity: 0,
             next_id: root,
@@ -538,8 +539,6 @@ impl HLSScheduler {
             let parent = self.hierarchy.mut_class(parent_id);
             parent.balance -= leaf_quota;
         }
-
-        debug!("Ticked hierarchy is: {:?}", &self.hierarchy);
     }
 
     /// Returns the fair quota of the requested class.
