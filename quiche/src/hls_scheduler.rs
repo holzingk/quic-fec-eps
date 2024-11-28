@@ -188,6 +188,10 @@ impl PartialOrd<Self> for HLSClass {
         // ...when the urgency is the same, and both are not incremental, order
         // by class ID. Default EPS would use the stream ID here.
         if !self.incremental && !other.incremental {
+            if self.stream_id.is_some() && other.stream_id.is_some() {
+                return self.stream_id.partial_cmp(&other.stream_id);
+            }
+
             return self.id.partial_cmp(&other.id);
         }
 

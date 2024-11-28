@@ -13926,7 +13926,7 @@ mod tests {
             assert_eq!(
                 frames.first(),
                 Some(&frame::Frame::Stream {
-                    stream_id: 4,
+                    stream_id: 12,
                     data: stream::RangeBuf::from(&out, off, false),
                 })
             );
@@ -13940,7 +13940,7 @@ mod tests {
             let stream = frames.first().unwrap();
 
             assert_eq!(stream, &frame::Frame::Stream {
-                stream_id: 12,
+                stream_id: 4,
                 data: stream::RangeBuf::from(&out, off, false),
             });
 
@@ -14080,7 +14080,7 @@ mod tests {
         assert_eq!(
             frames.first(),
             Some(&frame::Frame::Stream {
-                stream_id: 4,
+                stream_id: 12,
                 data: stream::RangeBuf::from(b"b", 0, false),
             })
         );
@@ -14093,7 +14093,7 @@ mod tests {
         assert_eq!(
             frames.first(),
             Some(&frame::Frame::Stream {
-                stream_id: 12,
+                stream_id: 4,
                 data: stream::RangeBuf::from(b"b", 0, false),
             })
         );
