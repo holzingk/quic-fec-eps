@@ -73,6 +73,9 @@ pub struct HLSHierarchy {
 
     /// Next class identifier to be assigned.
     next_id: u64,
+
+    /// Mapping of EPS classes to HLS IDs. Used to aggregate children correctly.
+    pub(crate) eps_to_hls_id: HashMap<String, u64>,
 }
 
 impl HLSHierarchy {
@@ -260,6 +263,7 @@ impl HLSHierarchy {
             root,
             capacity: 0,
             next_id: root,
+            eps_to_hls_id: Default::default(),
         };
 
         hierarchy.insert(3, false, 1, 0, 0, 0, None);

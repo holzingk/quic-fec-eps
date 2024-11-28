@@ -414,6 +414,7 @@ use std::str::FromStr;
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use itertools::Itertools;
 use smallvec::SmallVec;
 use crate::h3::Priority;
 
@@ -5242,23 +5243,47 @@ impl Connection {
 
         // The first (and default) parent is the root; start with it.
         // The class added last is the leaf.
-        let mut current_parent = hierarchy.root;
+        let mut parent = hierarchy.root;
 
         // Delete the current stream from the hierarchy.
         hierarchy.delete_class(stream_id, mtu);
 
         // Reverse priority values (pv) to append exp_p path parameters top-down.
         for pv in priority.0.iter().rev() {
-            // Insert the path element into the hierarchy and use it as the next parent.
-            current_parent = hierarchy.insert(
+            // The internal node we're adding may already be present
+            if let Some(eps_id) = pv.id.clone() {
+                if let Some((_k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
+                    parent = *v;
+
+                    // Reprioritize the internal class
+                    let internal_class = hierarchy.mut_class(parent);
+
+                    internal_class.urgency = pv.urgency;
+                    internal_class.incremental = pv.incremental;
+                    internal_class.weight = pv.weight;
+                    internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
+                    internal_class.protection_ratio = pv.protection_ratio;
+                    internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
+
+                    // Skip iteration
+                    continue;
+                }
+            }
+
+            parent = hierarchy.insert(
                 pv.urgency,
                 pv.incremental,
                 pv.weight,
                 pv.burst_loss_tolerance,
                 pv.protection_ratio,
                 pv.repair_delay_tolerance,
-                Some(current_parent)
+                Some(parent)
             );
+
+            // Add th
+            if pv.id.is_some() {
+                hierarchy.eps_to_hls_id.insert(pv.id.clone().unwrap(), parent);
+            }
 
             // Modify the root's capacity
             hierarchy.capacity += mtu as u64;
@@ -5268,7 +5293,7 @@ impl Connection {
         hierarchy.generate_guarantees();
 
         // Add the stream ID to the node.
-        hierarchy.mut_class(current_parent).stream_id = Some(stream_id);
+        hierarchy.mut_class(parent).stream_id = Some(stream_id);
 
         Ok(())
     }
@@ -7228,7 +7253,6 @@ impl Connection {
     ) -> Result<&mut stream::Stream> {
         // Clamp urgency
         let urgency = priority.0[0].urgency;
-        debug!("Creating stream {} with urgency={}", id, urgency);
 
         if urgency < h3::PRIORITY_URGENCY_LOWER_BOUND {
             priority.0[0].urgency = h3::PRIORITY_URGENCY_LOWER_BOUND;
@@ -7251,8 +7275,6 @@ impl Connection {
             self.is_server,
         );
 
-        // Now, modify the HLS hierarchy accordingly, but only if we are getting the stream
-        // instead of creating a new one.
         if let Ok(_) = result {
             // Append the stream to the HLS hierarchy
             let hierarchy = &mut self.hls_scheduler.hierarchy;
@@ -7264,20 +7286,33 @@ impl Connection {
             if !added_streams.contains(&id) {
                 // The first (and default) parent is the root; start with it.
                 // The class added last is the leaf.
-                let mut current_parent = hierarchy.root;
+                let mut parent = hierarchy.root;
 
                 // Reverse priority values (pv) to append exp_p path parameters top-down.
                 for pv in priority.0.iter().rev() {
-                    // Insert the path element into the hierarchy and use it as the next parent.
-                    current_parent = hierarchy.insert(
+                    // The internal node we're adding may already be present.
+                    // Don't reprioritize here.
+                    if let Some(eps_id) = pv.id.clone() {
+                        if let Some((_k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
+                            parent = *v;
+                            continue;
+                        }
+                    }
+
+                    parent = hierarchy.insert(
                         pv.urgency,
                         pv.incremental,
                         pv.weight,
                         pv.burst_loss_tolerance,
                         pv.protection_ratio,
                         pv.repair_delay_tolerance,
-                        Some(current_parent)
+                        Some(parent)
                     );
+
+                    // If we added an internal node, store or update the EPS -> HLS mapping.
+                    if pv.id.is_some() {
+                        hierarchy.eps_to_hls_id.insert(pv.id.clone().unwrap(), parent);
+                    }
 
                     // Modify the root's capacity
                     hierarchy.capacity += mtu as u64;
@@ -7287,7 +7322,7 @@ impl Connection {
                 hierarchy.generate_guarantees();
 
                 // Add the stream ID to the node.
-                hierarchy.mut_class(current_parent).stream_id = Some(id);
+                hierarchy.mut_class(parent).stream_id = Some(id);
             }
         }
 
