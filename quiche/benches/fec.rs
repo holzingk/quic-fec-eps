@@ -108,7 +108,7 @@ fn tetrys_encode_symbols(fec: &mut Tetrys) {
 
 fn bench_decoder_matrix_size_loss_at_start(c: &mut Criterion) {
     let mut group = c.benchmark_group("Decoding with loss at begin");
-    for size in (200_usize..1400_usize).step_by(200) {
+    for size in (10_usize..2000_usize).step_by(10) {
 	// about 5 percent loss
 	let loss = size.div_ceil(20_usize);
 	group.throughput(Throughput::Elements(size as u64));
@@ -123,7 +123,7 @@ fn bench_decoder_matrix_size_loss_at_start(c: &mut Criterion) {
 
 fn bench_decoder_matrix_size_loss_at_end(c: &mut Criterion) {
     let mut group = c.benchmark_group("Decoding with loss at end");
-    for size in (200_usize..1400_usize).step_by(200) {
+    for size in (10_usize..2000_usize).step_by(10) {
 	// about 5 percent loss
 	let loss = size.div_ceil(20_usize);
 	group.throughput(Throughput::Elements(size as u64));
@@ -138,7 +138,7 @@ fn bench_decoder_matrix_size_loss_at_end(c: &mut Criterion) {
 
 fn bench_encoder_matrix_size(c: &mut Criterion) {
     let mut group = c.benchmark_group("Encoding of one repair symbol");
-    for size in (200..1400).step_by(200) {
+    for size in (10..2000).step_by(10) {
 	group.throughput(Throughput::Elements(size as u64));
 	group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
 	    b.iter_batched_ref(|| prepare_encoder(size),
