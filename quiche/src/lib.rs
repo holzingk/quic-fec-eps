@@ -414,7 +414,6 @@ use std::str::FromStr;
 
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use itertools::Itertools;
 use smallvec::SmallVec;
 use crate::h3::Priority;
 
