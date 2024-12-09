@@ -418,7 +418,7 @@ use std::collections::HashMap;
 
 use smallvec::SmallVec;
 
-use crate::fec::{Tetrys, Symbol, SymbolKind, ReliabilityLevel};
+use crate::fec::{Tetrys, Symbol, SymbolKind, ReliabilityLevel, EncodingStats, DecodingStats};
 
 /// The current QUIC wire version.
 pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
@@ -5320,6 +5320,18 @@ impl Connection {
             .update_priority(&old_priority_key, &new_priority_key);
 
         Ok(())
+    }
+
+    fn get_fec_payload_length(&self) -> u16 {
+	self.max_send_udp_payload_size() as u16 - 75
+    }
+    
+    /// Returns fec stats for a particular stream
+    pub fn get_fec_stats(&mut self, stream_id: u64) -> (EncodingStats, DecodingStats) {
+	let fec_payload_length = self.get_fec_payload_length();
+	let f = self.fec.entry(stream_id)
+	    .or_insert_with(|| Tetrys::new(fec_payload_length).unwrap());
+	(f.encoder.get_stats(), f.decoder.get_stats())
     }
 
     /// Sets FEC properties of this stream

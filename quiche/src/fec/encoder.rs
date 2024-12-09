@@ -37,8 +37,12 @@ pub struct EncodingStats {
     pub in_flight: u64,
     /// Current ratio of protected symbols
     pub protection_ratio: f64,
-    /// recovered
-    pub recovered: u64,
+    /// sent repair symbols
+    pub sent_repair_symbols: u64,
+    /// sent source symbols
+    pub sent_source_symbols: u64,
+    /// retransmitted source symbols
+    pub retransmitted_source_symbols: u64,
 }
 
 /// The Encoder runs on the sending side of the protocol.
@@ -62,8 +66,10 @@ pub struct Encoder {
     //in_flight_ss: BTreeSet<u64>,
     // rids in flight, highest protected sid, count
     in_flight_rs: BTreeMap<u64, u64>,
-    // count of recovered symbols
-    recovered: u64,
+    // count of sent repair symbols
+    sent_repair_symbols: u64,
+    retransmitted_source_symbols: u64,
+    sent_source_symbols: u64,
     //    rsrc: StaticRepairSymbolRateController,
     app_limited: bool,
     left_for_tail_protection: u64,
@@ -84,6 +90,7 @@ impl Encoder {
 	let popped_sid = self.lost_ss.pop_front().unwrap();
 	assert_eq!(popped_sid, sid);
 	self.lost = self.lost.saturating_sub(1);
+	self.retransmitted_source_symbols += 1;
     }
     
     /// Informs the encoder about a detected lost repair symbol
@@ -94,7 +101,7 @@ impl Encoder {
 
     /// Returns statistics about the state of the encoder
     pub fn get_stats(&self) -> EncodingStats {
-	let in_flight_rs = self.in_flight_rs.iter()
+	let in_flight_rs = self.statsin_flight_rs.iter()
 	    .fold(0, |acc, (_sid, &count)| acc + count);
 	let in_flight_ss = self.sliding_window.len() as u64;
 	let in_flight = in_flight_rs + in_flight_ss;
@@ -103,7 +110,9 @@ impl Encoder {
 	    in_flight_ss,
 	    in_flight,
 	    protection_ratio: in_flight_rs as f64 / in_flight as f64,
-	    recovered: self.recovered,
+	    sent_repair_symbols: self.sent_repair_symbols,
+	    sent_source_symbols: self.sent_source_symbols,
+	    retransmitted_source_symbols: self.retransmitted_source_symbols
 	}
     }
 
@@ -205,7 +214,9 @@ impl Encoder {
 	    reliability_level: ReliabilityLevel::RecoveryOnly,
 	    lost: 0,
 	    in_flight_rs: BTreeMap::new(),
-	    recovered: 0,
+	    sent_repair_symbols: 0,
+	    retransmitted_source_symbols: 0,
+	    sent_source_symbols: 0,
 	    app_limited: true,
 	    left_for_tail_protection: 0,
 	    incremental: false,
@@ -236,6 +247,7 @@ impl Encoder {
         self.next_id += 1;
 	self.app_limited = false;
 	self.left_for_tail_protection = 0;
+	self.sent_source_symbols += 1;
         //self.rsrc.add_source_symbol();
         Ok(res)
     }
@@ -307,7 +319,7 @@ impl Encoder {
     pub fn put_repair_symbol_in_flight(&mut self, largest_symbol_id: u64) {
 	if self.lost >  0 {
 	    self.lost = self.lost.saturating_sub(1);
-	    self.recovered += 1;
+	    self.sent_repair_symbols += 1;
 	    trace!("Encoder recovering loss with a repair symbol");
 	} else if self.left_for_tail_protection > 0 {
 	    self.left_for_tail_protection -= 1;

@@ -338,6 +338,13 @@ impl RepairSymbols {
     }
 }
 
+#[derive(Debug)]
+pub struct DecodingStats {
+    pub recovered: u64,
+    pub received_source_symbols: u64,
+    pub received_repair_symbols: u64,
+}
+
 /// The decoder for the Tetrys protocol
 #[derive(Debug)]
 pub struct Decoder {
@@ -345,6 +352,9 @@ pub struct Decoder {
     gf: Gf,
     source_symbols: SourceSymbols,
     repair_symbols: RepairSymbols,
+    recovered: u64,
+    received_source_symbols: u64,
+    received_repair_symbols: u64,
     safc: SymbolAckFrequencyController,
 }
 
@@ -356,8 +366,19 @@ impl Decoder {
             gf: Gf::new()?,
             source_symbols: SourceSymbols::new(),
             repair_symbols: RepairSymbols::new(),
+	    recovered: 0,
+	    received_source_symbols: 0,
+	    received_repair_symbols: 0,
             safc: SymbolAckFrequencyController::new(),
         })
+    }
+
+    pub fn get_stats(&self) -> DecodingStats {
+	DecodingStats {
+	    recovered: self.recovered,
+	    received_source_symbols: self.received_source_symbols,
+	    received_repair_symbols: self.received_repair_symbols
+	}
     }
 
     /// Add new received source symbol
@@ -367,6 +388,7 @@ impl Decoder {
 	trace!("Received source symbol {source_symbol_id}");
         let ss = SourceSymbol::new(source_symbol_id, src, &self.config)?;
         self.source_symbols.add(ss);
+	self.received_source_symbols += 1;
         Ok(())
     }
 
@@ -384,6 +406,7 @@ impl Decoder {
         )?;
 	self.source_symbols.inform_rs_largest_symbol_id(largest_symbol_id);
         self.repair_symbols.add(rs);
+	self.received_repair_symbols += 1;
         Ok(())
     }
 
@@ -711,6 +734,7 @@ impl Decoder {
                     .to_vec();
 		self.add_source_symbol(*missing_sid, &new.as_slice()).unwrap();
 		ret.push(new);
+		self.recovered += 1;
             }
             // inform source symbols that something is no longer missing
             self.source_symbols.successfully_restored(largest_sid);

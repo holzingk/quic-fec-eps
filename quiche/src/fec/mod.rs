@@ -5,7 +5,7 @@ mod encoder;
 mod error;
 mod symbol;
 
-pub use decoder::Decoder;
+pub use decoder::{Decoder, DecodingStats};
 pub use encoder::{Encoder, SymbolKind, ReliabilityLevel, EncodingStats};
 pub use error::FecError;
 

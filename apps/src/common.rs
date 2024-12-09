@@ -55,6 +55,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::str::FromStr;
 use std::convert::TryInto;
 
+use jzon::object;
+
 pub fn stdout_sink(out: String) {
     print!("{out}");
 }
@@ -199,6 +201,10 @@ pub fn make_qlog_writer(
             path, e
         ),
     }
+}
+
+fn dump_fec_stats() -> {
+    let mut data = object!
 }
 
 fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {

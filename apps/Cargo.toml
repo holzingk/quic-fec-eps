@@ -33,6 +33,7 @@ libc = "0.2"
 nix = { version = "0.27", features = ["net", "socket", "uio"] }
 slab = "0.4"
 itertools = "0.10"
+jzon = "0.12.5"
 
 [lib]
 crate-type = ["lib"]
