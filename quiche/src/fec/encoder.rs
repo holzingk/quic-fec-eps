@@ -101,7 +101,7 @@ impl Encoder {
 
     /// Returns statistics about the state of the encoder
     pub fn get_stats(&self) -> EncodingStats {
-	let in_flight_rs = self.statsin_flight_rs.iter()
+	let in_flight_rs = self.in_flight_rs.iter()
 	    .fold(0, |acc, (_sid, &count)| acc + count);
 	let in_flight_ss = self.sliding_window.len() as u64;
 	let in_flight = in_flight_rs + in_flight_ss;

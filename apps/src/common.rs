@@ -55,7 +55,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::str::FromStr;
 use std::convert::TryInto;
 
-use jzon::object;
+use serde::{Serialize, Deserialize};
+use serde_json;
 
 pub fn stdout_sink(out: String) {
     print!("{out}");
@@ -106,6 +107,16 @@ pub struct Client {
     pub max_send_burst: usize,
 }
 
+#[derive(Serialize, Deserialize)]
+struct FecStats {
+    decoder_recovered: u64,
+    decoder_ss: u64,
+    decoder_rs: u64,
+    encoder_ss: u64,
+    encoder_rs: u64,
+    encoder_re_tx: u64
+}
+
 pub type ClientIdMap = HashMap<ConnectionId<'static>, ClientId>;
 pub type ClientMap = HashMap<ClientId, Client>;
 
@@ -141,6 +152,27 @@ fn make_resource_writer(
     None
 }
 
+fn make_fec_dump_writer(
+    url: &url::Url, target_path: &Option<String>, stream_id: u64, cardinal: u64,
+) -> Option<std::io::BufWriter<std::fs::File>> {
+       if let Some(tp) = target_path {
+        let resource =
+            url.path_segments().map(|c| c.collect::<Vec<_>>()).unwrap();
+
+           let mut path = format!("{}/{}_{}.json", tp, resource.iter().last().unwrap(), stream_id);
+
+           if cardinal > 1 {
+               path = format!("{path}.{cardinal}");
+           }
+
+	   match std::fs::File::create(&path) {
+	       Ok(f) => return Some(std::io::BufWriter::new(f)),
+
+	       Err(_e) => panic!("Error creating file"), 
+	   }
+       }
+    None
+}
 /// Creates a vector wich contains a series of the current timestamp in u128 values.
 /// Length is round up to the next number divisable by 128
 fn make_body_with_timestamp(len: usize) -> Vec<u8> {
@@ -201,10 +233,6 @@ pub fn make_qlog_writer(
             path, e
         ),
     }
-}
-
-fn dump_fec_stats() -> {
-    let mut data = object!
 }
 
 fn dump_json(reqs: &[Http3Request], output_sink: &mut dyn FnMut(String)) {
@@ -444,6 +472,7 @@ struct Http3Request {
     #[allow(dead_code)]
     response_body_max: usize,
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
+    fec_writer: Option<std::io::BufWriter<std::fs::File>>,
     t_sent: Option<SystemTime>,
     t_first_byte: Option<SystemTime>,
 }
@@ -896,6 +925,7 @@ impl Http3Conn {
                     response_body_max: dump_json.unwrap_or_default(),
                     stream_id: None,
                     response_writer: None,
+		    fec_writer: None,
 		    t_sent: None,
 		    t_first_byte: None,
                 });
@@ -1232,6 +1262,8 @@ impl HttpConn for Http3Conn {
             req.stream_id = Some(s);
             req.response_writer =
                 make_resource_writer(&req.url, target_path, req.cardinal);
+	    req.fec_writer =
+		make_fec_dump_writer(&req.url, target_path, s, req.cardinal);
             self.sent_body_bytes.insert(s, 0);
 
             reqs_done += 1;
@@ -1419,6 +1451,22 @@ impl HttpConn for Http3Conn {
                             //     .ok();
                         },
 			None => warn!("No reponse writer found"),
+		    }
+
+		    let (encoder_stats, decoder_stats) = conn.get_fec_stats(stream_id);
+		    let stats = FecStats {
+			decoder_recovered: decoder_stats.recovered,
+			decoder_ss: decoder_stats.received_source_symbols,
+			decoder_rs: decoder_stats.received_repair_symbols,
+			encoder_ss: encoder_stats.sent_repair_symbols,
+			encoder_rs: encoder_stats.sent_source_symbols,
+			encoder_re_tx: encoder_stats.retransmitted_source_symbols
+		    };
+		    match &mut req.fec_writer {
+			Some(fw) => {
+			    serde_json::to_writer(fw, &stats).unwrap();
+			},
+			None => warn!("No fec writer found"),
 		    }
 
                     if self.reqs_complete == reqs_count {
