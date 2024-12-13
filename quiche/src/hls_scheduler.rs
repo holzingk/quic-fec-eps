@@ -164,9 +164,9 @@ impl HLSHierarchy {
             }
 
             // Remove keys from the EPS to HLS mapping, if necessary
-            for eps_id in eps_to_remove {
-                self.eps_to_hls_id.remove(&*eps_id);
-            }
+            // for eps_id in eps_to_remove {
+            //     self.eps_to_hls_id.remove(&*eps_id);
+            // }
         }
 
         if capacity >= capacity_decrease {
