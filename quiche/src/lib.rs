@@ -5240,15 +5240,13 @@ impl Connection {
         // Update the hierarchy, too.
         let hierarchy = &mut self.hls_scheduler.hierarchy;
 
-        debug!("Hierarchy before changes: {:?}", hierarchy);
+        debug!("Hierarchy before re-prioritization: {:?}", hierarchy);
         // The first (and default) parent is the root; start with it.
         // The class added last is the leaf.
         let mut parent = hierarchy.root;
 
         // Delete the current stream from the hierarchy.
         hierarchy.delete_class(stream_id, mtu);
-
-        debug!("Hierarchy after deletion: {:?}", hierarchy);
 
         // Reverse priority values (pv) to append exp_p path parameters top-down.
         for pv in priority.0.iter().rev() {

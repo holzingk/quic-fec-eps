@@ -140,8 +140,10 @@ impl HLSHierarchy {
 
             // Remove children bottom-up
             while let Some(parent_id) = class.parent {
+                debug!("Deleting child {child_id} with parent {parent_id}");
                 // Check whether to remove the class from the HLS mapping
-                if let Some((eps_id, _)) = self.eps_to_hls_id.iter().find_or_first(|(_, hls)| child_id == **hls) {
+                if let Some((eps_id, hls_id)) = self.eps_to_hls_id.iter().find_or_first(|(_, hls)| child_id == **hls) {
+                    debug!("node {hls_id} is internal with eps id={eps_id} and should be removed");
                     eps_to_remove.push(eps_id.clone());
                 }
 
@@ -164,9 +166,10 @@ impl HLSHierarchy {
             }
 
             // Remove keys from the EPS to HLS mapping, if necessary
-            // for eps_id in eps_to_remove {
-            //     self.eps_to_hls_id.remove(&*eps_id);
-            // }
+            for eps_id in eps_to_remove {
+                debug!("Removing EPS ID {eps_id} from the mapping");
+                self.eps_to_hls_id.remove(&*eps_id);
+            }
         }
 
         if capacity >= capacity_decrease {
