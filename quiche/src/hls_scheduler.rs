@@ -129,14 +129,14 @@ impl HLSHierarchy {
         let capacity = self.capacity;
         let leaves = self.leaf_descendants(root);
 
+        let mut deleted_hls: Vec<u64> = Vec::new();
+        let mut deleted_eps: Vec<String> = Vec::new();
         let mut capacity_decrease: u64 = 0;
 
         // Find the leaf with the corresponding stream ID
         if let Some(class_id) = leaves.iter().find_or_first(|l| self.class(**l).stream_id == Option::from(stream_id)) {
             let mut class = self.class(*class_id);
             let mut child_id = *class_id;
-
-            let mut eps_to_remove: Vec<String> = Vec::new();
 
             // Remove children bottom-up
             while let Some(parent_id) = class.parent {
@@ -153,24 +153,26 @@ impl HLSHierarchy {
 
                 // If the parent has no children left, continue removing classes.
                 if parent_class.children.is_empty() {
-                    // Check whether to remove the class from the HLS mapping
-                    if let Some((eps_id, hls_id)) = self.eps_to_hls_id.iter().find_or_first(|(_, hls)| parent_id == **hls) {
-                        debug!("node {hls_id} is internal with eps id={eps_id} and should be removed");
-                        eps_to_remove.push(eps_id.clone());
-                    }
-
+                    deleted_hls.push(parent_id);
                     child_id = parent_id;
                     class = parent_class;
                 } else {
                     break;
                 }
             }
+        }
 
-            // Remove keys from the EPS to HLS mapping, if necessary
-            for eps_id in eps_to_remove {
-                debug!("Removing EPS ID {eps_id} from the mapping");
-                self.eps_to_hls_id.remove(&*eps_id);
+        // Remove keys from the EPS to HLS mapping, if necessary
+        for hls_id in deleted_hls {
+            // Check whether to remove the class from the HLS mapping
+            if let Some((eps_id, _)) = self.eps_to_hls_id.iter().find_or_first(|(_, hls)| hls_id == **hls) {
+                deleted_eps.push(eps_id.clone());
             }
+        }
+
+        for eps_id in deleted_eps {
+            debug!("Removing EPS ID {eps_id} from the hierachy");
+            self.eps_to_hls_id.remove(&eps_id);
         }
 
         if capacity >= capacity_decrease {
