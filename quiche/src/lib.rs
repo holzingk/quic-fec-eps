@@ -5240,12 +5240,15 @@ impl Connection {
         // Update the hierarchy, too.
         let hierarchy = &mut self.hls_scheduler.hierarchy;
 
+        debug!("Hierarchy before changes: {:?}", hierarchy);
         // The first (and default) parent is the root; start with it.
         // The class added last is the leaf.
         let mut parent = hierarchy.root;
 
         // Delete the current stream from the hierarchy.
         hierarchy.delete_class(stream_id, mtu);
+
+        debug!("Hierarchy after deletion: {:?}", hierarchy);
 
         // Reverse priority values (pv) to append exp_p path parameters top-down.
         for pv in priority.0.iter().rev() {
@@ -5279,7 +5282,6 @@ impl Connection {
                 Some(parent)
             );
 
-            // Add th
             if pv.id.is_some() {
                 hierarchy.eps_to_hls_id.insert(pv.id.clone().unwrap(), parent);
             }
@@ -5287,6 +5289,8 @@ impl Connection {
             // Modify the root's capacity
             hierarchy.capacity += mtu as u64;
         }
+
+        debug!("Hierarchy after re-adding: {:?}", hierarchy);
 
         // Convert weights into global guarantees accounting for the new capacity
         hierarchy.generate_guarantees();
