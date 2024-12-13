@@ -109,6 +109,7 @@ pub struct Client {
 
 #[derive(Serialize, Deserialize)]
 struct FecStats {
+    stream_id: u64,
     decoder_recovered: u64,
     decoder_ss: u64,
     decoder_rs: u64,
@@ -1455,6 +1456,7 @@ impl HttpConn for Http3Conn {
 
 		    let (encoder_stats, decoder_stats) = conn.get_fec_stats(stream_id);
 		    let stats = FecStats {
+			stream_id: stream_id,
 			decoder_recovered: decoder_stats.recovered,
 			decoder_ss: decoder_stats.received_source_symbols,
 			decoder_rs: decoder_stats.received_repair_symbols,
