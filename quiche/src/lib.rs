@@ -5195,7 +5195,7 @@ impl Connection {
 
         // Modify the stream's urgency, if necessary.
         // Ensure the urgency is clamped to 0-7.
-        debug!("Reprioritizing stream {stream_id} to u={}", priority.0[0].urgency);
+        debug!("Reprioritizing stream {stream_id} to {:?}", priority);
 
         let clamped_urgency = match priority.0[0].urgency {
             u if u < h3::PRIORITY_URGENCY_LOWER_BOUND => {
