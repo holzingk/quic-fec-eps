@@ -4466,7 +4466,7 @@ impl Connection {
 
                 // How much data the stream currently has queued to send.
                 let stream_request = stream.send.len;
-                debug!(
+                trace!(
                     "Round-robin: stream {} is requesting {} bytes",
                     stream_id,
                     stream_request
