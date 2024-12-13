@@ -136,8 +136,15 @@ impl HLSHierarchy {
             let mut class = self.class(*class_id);
             let mut child_id = *class_id;
 
+            let mut eps_to_remove: Vec<String> = Vec::new();
+
             // Remove children bottom-up
             while let Some(parent_id) = class.parent {
+                // Check whether to remove the class from the HLS mapping
+                if let Some((eps_id, _)) = self.eps_to_hls_id.iter().find_or_first(|(_, hls)| child_id == **hls) {
+                    eps_to_remove.push(eps_id.clone());
+                }
+
                 // Get the parent of the child
                 let parent_class = self.mut_class(parent_id);
 
@@ -154,6 +161,11 @@ impl HLSHierarchy {
                 } else {
                     break;
                 }
+            }
+
+            // Remove keys from the EPS to HLS mapping, if necessary
+            for eps_id in eps_to_remove {
+                self.eps_to_hls_id.remove(&*eps_id);
             }
         }
 
