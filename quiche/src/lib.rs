@@ -5253,24 +5253,24 @@ impl Connection {
         // Reverse priority values (pv) to append exp_p path parameters top-down.
         for pv in priority.0.iter().rev() {
             // The internal node we're adding may already be present
-            if let Some(eps_id) = pv.id.clone() {
-                if let Some((_k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
-                    parent = *v;
-
-                    // Reprioritize the internal class
-                    let internal_class = hierarchy.mut_class(parent);
-
-                    internal_class.urgency = pv.urgency;
-                    internal_class.incremental = pv.incremental;
-                    internal_class.weight = pv.weight;
-                    internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
-                    internal_class.protection_ratio = pv.protection_ratio;
-                    internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
-
-                    // Skip iteration
-                    continue;
-                }
-            }
+            // if let Some(eps_id) = pv.id.clone() {
+            //     if let Some((_k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
+            //         parent = *v;
+            //
+            //         // Reprioritize the internal class
+            //         let internal_class = hierarchy.mut_class(parent);
+            //
+            //         internal_class.urgency = pv.urgency;
+            //         internal_class.incremental = pv.incremental;
+            //         internal_class.weight = pv.weight;
+            //         internal_class.burst_loss_tolerance = pv.burst_loss_tolerance;
+            //         internal_class.protection_ratio = pv.protection_ratio;
+            //         internal_class.repair_delay_tolerance = pv.repair_delay_tolerance;
+            //
+            //         // Skip iteration
+            //         continue;
+            //     }
+            // }
 
             parent = hierarchy.insert(
                 pv.urgency,
@@ -7295,12 +7295,12 @@ impl Connection {
                 for pv in priority.0.iter().rev() {
                     // The internal node we're adding may already be present.
                     // Don't reprioritize here.
-                    if let Some(eps_id) = pv.id.clone() {
-                        if let Some((_k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
-                            parent = *v;
-                            continue;
-                        }
-                    }
+                    // if let Some(eps_id) = pv.id.clone() {
+                    //     if let Some((_k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
+                    //         parent = *v;
+                    //         continue;
+                    //     }
+                    // }
 
                     parent = hierarchy.insert(
                         pv.urgency,
