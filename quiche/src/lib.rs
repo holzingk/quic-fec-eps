@@ -5290,13 +5290,13 @@ impl Connection {
             hierarchy.capacity += mtu as u64;
         }
 
-        debug!("Hierarchy after re-adding: {:?}", hierarchy);
-
         // Convert weights into global guarantees accounting for the new capacity
         hierarchy.generate_guarantees();
 
         // Add the stream ID to the node.
         hierarchy.mut_class(parent).stream_id = Some(stream_id);
+
+        debug!("Hierarchy after re-adding: {:?}", hierarchy);
 
         Ok(())
     }
