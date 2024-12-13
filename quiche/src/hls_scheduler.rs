@@ -141,11 +141,6 @@ impl HLSHierarchy {
             // Remove children bottom-up
             while let Some(parent_id) = class.parent {
                 debug!("Deleting child {child_id} with parent {parent_id}");
-                // Check whether to remove the class from the HLS mapping
-                if let Some((eps_id, hls_id)) = self.eps_to_hls_id.iter().find_or_first(|(_, hls)| child_id == **hls) {
-                    debug!("node {hls_id} is internal with eps id={eps_id} and should be removed");
-                    eps_to_remove.push(eps_id.clone());
-                }
 
                 // Get the parent of the child
                 let parent_class = self.mut_class(parent_id);
@@ -158,6 +153,12 @@ impl HLSHierarchy {
 
                 // If the parent has no children left, continue removing classes.
                 if parent_class.children.is_empty() {
+                    // Check whether to remove the class from the HLS mapping
+                    if let Some((eps_id, hls_id)) = self.eps_to_hls_id.iter().find_or_first(|(_, hls)| parent_id == **hls) {
+                        debug!("node {hls_id} is internal with eps id={eps_id} and should be removed");
+                        eps_to_remove.push(eps_id.clone());
+                    }
+
                     child_id = parent_id;
                     class = parent_class;
                 } else {
