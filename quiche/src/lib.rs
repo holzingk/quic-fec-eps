@@ -5255,8 +5255,8 @@ impl Connection {
             // The internal node we're adding may already be present
             if let Some(eps_id) = pv.id.clone() {
                 debug!("Re-adding node with EPS id={}", eps_id);
-                if let Some((_k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
-                    debug!("Node has been previously added, skipping");
+                if let Some((k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
+                    debug!("EPS ID {k} with HLS ID {v} has been previously added, skipping");
                     parent = *v;
 
                     // Reprioritize the internal class
@@ -5274,7 +5274,6 @@ impl Connection {
                 }
             }
 
-            debug!("Inserting....");
             parent = hierarchy.insert(
                 pv.urgency,
                 pv.incremental,
@@ -5286,7 +5285,7 @@ impl Connection {
             );
 
             if pv.id.is_some() {
-                debug!("Adding to EPS set");
+                debug!("Adding {} to EPS set", pv.id.clone().unwrap());
                 hierarchy.eps_to_hls_id.insert(pv.id.clone().unwrap(), parent);
             }
 
