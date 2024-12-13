@@ -7295,12 +7295,12 @@ impl Connection {
                 for pv in priority.0.iter().rev() {
                     // The internal node we're adding may already be present.
                     // Don't reprioritize here.
-                    // if let Some(eps_id) = pv.id.clone() {
-                    //     if let Some((_k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
-                    //         parent = *v;
-                    //         continue;
-                    //     }
-                    // }
+                    if let Some(eps_id) = pv.id.clone() {
+                        if let Some((_k, v)) = hierarchy.eps_to_hls_id.get_key_value(&eps_id) {
+                            parent = *v;
+                            continue;
+                        }
+                    }
 
                     parent = hierarchy.insert(
                         pv.urgency,
