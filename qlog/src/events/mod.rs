@@ -245,6 +245,11 @@ impl From<EventType> for EventImportance {
             EventType::QpackEventType(QpackEventType::InstructionParsed) =>
                 EventImportance::Base,
 
+	    EventType::FecEventType(FecEventType::DecoderMetricsUpdated) =>
+		EventImportance::Base,
+	    EventType::FecEventType(FecEventType::EncoderMetricsUpdated) =>
+		EventImportance::Base,
+
             _ => unimplemented!(),
         }
     }
@@ -259,7 +264,8 @@ pub enum EventCategory {
     Recovery,
     Http,
     Qpack,
-
+    Fec,
+    
     Error,
     Warning,
     Info,
@@ -277,6 +283,7 @@ impl std::fmt::Display for EventCategory {
             EventCategory::Recovery => "recovery",
             EventCategory::Http => "http",
             EventCategory::Qpack => "qpack",
+	    EventCategory::Fec => "fec",
             EventCategory::Error => "error",
             EventCategory::Warning => "warning",
             EventCategory::Info => "info",
@@ -298,6 +305,7 @@ impl From<EventType> for EventCategory {
             EventType::RecoveryEventType(_) => EventCategory::Recovery,
             EventType::Http3EventType(_) => EventCategory::Http,
             EventType::QpackEventType(_) => EventCategory::Qpack,
+	    EventType::FecEventType(_) => EventCategory::Fec,
 
             _ => unimplemented!(),
         }
