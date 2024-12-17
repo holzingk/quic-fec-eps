@@ -154,13 +154,13 @@ fn make_resource_writer(
 }
 
 fn make_fec_dump_writer(
-    url: &url::Url, target_path: &Option<String>, stream_id: u64, cardinal: u64,
+    url: &url::Url, target_path: &Option<String>, stream_id: u64, cardinal: u64, endpoint: String,
 ) -> Option<std::io::BufWriter<std::fs::File>> {
        if let Some(tp) = target_path {
         let resource =
             url.path_segments().map(|c| c.collect::<Vec<_>>()).unwrap();
 
-           let mut path = format!("{}/{}_{}.json", tp, resource.iter().last().unwrap(), stream_id);
+           let mut path = format!("{}/{}_{}_{}.json", tp, endpoint, resource.iter().last().unwrap(), stream_id);
 
            if cardinal > 1 {
                path = format!("{path}.{cardinal}");
@@ -1264,7 +1264,7 @@ impl HttpConn for Http3Conn {
             req.response_writer =
                 make_resource_writer(&req.url, target_path, req.cardinal);
 	    req.fec_writer =
-		make_fec_dump_writer(&req.url, target_path, s, req.cardinal);
+		make_fec_dump_writer(&req.url, target_path, s, req.cardinal, String::from("client"));
             self.sent_body_bytes.insert(s, 0);
 
             reqs_done += 1;
