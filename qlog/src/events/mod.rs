@@ -46,6 +46,8 @@ pub enum EventType {
 
     RecoveryEventType(RecoveryEventType),
 
+    FecEventType(FecEventType),
+
     Http3EventType(Http3EventType),
 
     QpackEventType(QpackEventType),
@@ -389,6 +391,15 @@ impl From<&EventData> for EventType {
                     RecoveryEventType::MarkedForRetransmit,
                 ),
 
+	    EventData::DecoderMetricsUpdated { .. } =>
+		EventType::FecEventType(
+		    FecEventType::DecoderMetricsUpdated,
+		),
+	    EventData::EncoderMetricsUpdated { .. } =>
+		EventType::FecEventType(
+		    FecEventType::EncoderMetricsUpdated,
+		),
+
             EventData::H3ParametersSet { .. } =>
                 EventType::Http3EventType(Http3EventType::ParametersSet),
             EventData::H3ParametersRestored { .. } =>
@@ -535,6 +546,12 @@ pub enum EventData {
 
     #[serde(rename = "recovery:metrics_updated")]
     MetricsUpdated(quic::MetricsUpdated),
+
+    #[serde(rename = "fec:decoder_metrics_updated")]
+    DecoderMetricsUpdated(quic::DecoderMetricsUpdated),
+
+    #[serde(rename = "fec:encoder_metrics_updated")]
+    EncoderMetricsUpdated(quic::EncoderMetricsUpdated),
 
     #[serde(rename = "recovery:congestion_state_updated")]
     CongestionStateUpdated(quic::CongestionStateUpdated),

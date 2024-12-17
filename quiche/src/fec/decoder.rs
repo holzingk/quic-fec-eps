@@ -3,15 +3,15 @@ use super::symbol::{RepairSymbol, SourceSymbol, Symbol, SymbolRow};
 use super::{FecConfig, Gf};
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-// use std::time::{Duration, Instant};
 use std::cmp;
 
 use std::convert::TryInto;
 use ::gf256::*;
 
 use rand::prelude::*;
-//use rand::{thread_rng, Rng};
-//use rand_core::RngCore;
+
+#[cfg(feature = "qlog")]
+use qlog::events::EventData;
 
 #[derive(Debug)]
 struct SymbolAckFrequencyController {
@@ -381,6 +381,17 @@ impl Decoder {
 	}
     }
 
+    /// Returns qlog event
+    pub fn qlog_event(&self) -> EventData {
+	qlog::events::EventData::DecoderMetricsUpdated(qlog::events::quic::DecoderMetricsUpdated {
+	    recovered: self.recovered,
+	    rx_ss: self.received_source_symbols,
+	    rx_rs: self.received_repair_symbols,
+	    window_ss: self.num_source_symbols() as u64,
+	    window_rs: self.num_repair_symbols() as u64,
+	})
+    }
+    
     /// Add new received source symbol
     pub fn add_source_symbol(
         &mut self, source_symbol_id: u64, src: &[u8],

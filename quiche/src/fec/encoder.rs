@@ -4,6 +4,10 @@ use super::{FecConfig, Gf};
 use std::collections::{VecDeque, BTreeMap};
 use super::symbol::Symbol;
 
+#[cfg(feature = "qlog")]
+use qlog::events::EventData;
+
+
 /// The kind of the symbol
 #[derive(Debug, PartialEq)]
 pub enum SymbolKind {
@@ -79,6 +83,22 @@ pub struct Encoder {
 
 impl Encoder {
 
+    /// Return qlog event
+    pub fn qlog_event(&self) -> EventData {
+	let in_flight_rs = self.in_flight_rs.iter()
+	    .fold(0, |acc, (_sid, &count)| acc + count);
+	let in_flight_ss = self.sliding_window.len() as u64;
+	let in_flight = in_flight_rs + in_flight_ss;
+	qlog::events::EventData::EncoderMetricsUpdated(qlog::events::quic::EncoderMetricsUpdated {
+	    in_flight_rs,
+	    in_flight_ss,
+	    in_flight,
+	    tx_ss: self.sent_source_symbols,
+	    tx_rs: self.sent_repair_symbols,
+	    tx_re_ss: self.retransmitted_source_symbols,
+	})
+    }
+    
     pub fn on_detected_source_symbol_loss(&mut self, sid: u64) {
 	trace!("SID {sid} is lost");
 	// mark sid lost in lost buffer VecDeque<u64>

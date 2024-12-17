@@ -33,7 +33,7 @@
 //! for timers.
 //!
 //! [quiche]: https://github.com/cloudflare/quiche/
-//! [ietf]: https://quicwg.org/
+//! [ietf]: htrg/
 //!
 //! ## Configuring connections
 //!
@@ -46,7 +46,7 @@
 //!
 //! // Additional configuration specific to application and use case...
 //! # Ok::<(), quiche::Error>(())
-//! ```
+//! ```FecEventType
 //!
 //! The [`Config`] object controls important aspects of the QUIC connection such
 //! as QUIC version, ALPN IDs, flow control, congestion control, idle timeout
@@ -388,6 +388,8 @@ use qlog::events::connectivity::TransportOwner;
 use qlog::events::quic::RecoveryEventType;
 #[cfg(feature = "qlog")]
 use qlog::events::quic::TransportEventType;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::FecEventType;
 #[cfg(feature = "qlog")]
 use qlog::events::DataRecipient;
 #[cfg(feature = "qlog")]
@@ -1703,6 +1705,14 @@ const QLOG_METRICS: EventType =
     EventType::RecoveryEventType(RecoveryEventType::MetricsUpdated);
 
 #[cfg(feature = "qlog")]
+const QLOG_FEC_ENCODER: EventType =
+    EventType::FecEventType(FecEventType::EncoderMetricsUpdated);
+
+#[cfg(feature = "qlog")]
+const QLOG_FEC_DECODER: EventType =
+    EventType::FecEventType(FecEventType::DecoderMetricsUpdated);
+
+#[cfg(feature = "qlog")]
 struct QlogInfo {
     streamer: Option<qlog::streamer::QlogStreamer>,
     logged_peer_params: bool,
@@ -2873,7 +2883,13 @@ impl Connection {
 	// Try to restore frames using FEC
 	let mut restored = Vec::new();
 	for (_, tetrys) in self.fec.iter_mut() {
-	    restored.append(&mut tetrys.decoder.try_decode());
+	    let mut decoded = tetrys.decoder.try_decode();
+	    if !decoded.is_empty() {
+		qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+		    q.add_event_data_with_instant(tetrys.decoder.qlog_event(), now).ok();
+		});
+	    }
+	    restored.append(&mut decoded);
 	}
 	// Process restored frames
 	for restored_symbol in restored {
@@ -3627,21 +3643,27 @@ impl Connection {
 		    // Inform FEC about detected symbol loss
                     frame::Frame::SourceSymbol {fec_session, sid, .. } | frame::Frame::SourceSymbolHeader { fec_session, sid, .. } => {
 			trace!("Informing encoder of fec session {fec_session} about loss of Source Symbol {sid}");
-			if self.fec.get_mut(&fec_session)
-			    .map(|tetrys| tetrys.encoder.on_detected_source_symbol_loss(sid))
-			    .is_none() {
-				warn!("Detected loss of unknown fec session {fec_session}");
-			    }
+			match self.fec.get_mut(&fec_session) {
+			    Some(tetrys) => {
+				tetrys.encoder.on_detected_source_symbol_loss(sid);
+				qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+				})},
+			    None => warn!("Detected loss of unknown fec session {fec_session}"),
+			}
 		    },
 
 		    frame::Frame::Repair { fec_session, smallest_sid, highest_sid, .. }  => {
 			trace!("Informing encoder of fec session {fec_session} about loss of Repair Symbol {smallest_sid} - {highest_sid}");
-			if self.fec.get_mut(&fec_session)
-			    .map(|tetrys| tetrys.encoder.on_detected_repair_symbol_loss())
-			    .is_none() {
-			    warn!("Detected loss of unknown fec session {fec_session}");
+			match self.fec.get_mut(&fec_session) {
+			    Some(tetrys) => {
+				tetrys.encoder.on_detected_repair_symbol_loss();
+				qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+				})},
+			    None => warn!("Detected loss of unknown fec session {fec_session}"),
 			}
-		    }
+		    },
 
 		    // Ignore the rest
 		    _ => {},
@@ -4414,6 +4436,9 @@ impl Connection {
 				ack_eliciting = true;
 				in_flight = true;
 				tetrys.encoder.put_repair_symbol_in_flight(highest_sid);
+				qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+				});
 			    }
 			} else {
 			    trace!("{} Not enough space {left} left for this repair symbol {}", self.trace_id, repair_frame.wire_len());
@@ -4437,6 +4462,9 @@ impl Connection {
 				ack_eliciting = true;
 				in_flight = true;
 				tetrys.encoder.put_retransmitted_source_symbol_in_flight(sid);
+				qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+				});
 			    }
 			} else {
 			    trace!("{} Not enough space {left} left for this source symbol {}", self.trace_id, ss_frame.wire_len());
@@ -4661,10 +4689,14 @@ impl Connection {
 		trace!("Encoded Stream {stream_id}, offset: {stream_off}, len: {len}");
 		// Add to source symbols
 		if stream.fec {
-		    self.fec.get_mut(&stream_id)
-			.unwrap()
+		    let tetrys = self.fec.get_mut(&stream_id).unwrap();
+		    tetrys
 			.encoder
-			.add_source_symbol(&b.as_ref()[fec_hdr_len..(fec_hdr_len + stream_hdr_len + len)]).unwrap();
+			.add_source_symbol(&b.as_ref()[fec_hdr_len..(fec_hdr_len + stream_hdr_len + len)])
+			.unwrap();
+		    qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+			q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+		    });
 		}
 
 		// Advance the packet buffer's offset.
@@ -8007,12 +8039,9 @@ impl Connection {
 					    seed as u16,
 					    data.as_slice())
 		    .unwrap();
-		// self.fec.get_mut(&fec_session).unwrap()
-		//     .decoder.add_repair_symbol(smallest_sid,
-		// 			       highest_sid,
-		// 			       seed as u16,
-		// 			       data.as_slice())
-		//     .unwrap();
+		qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+		    q.add_event_data_with_instant(f.encoder.qlog_event(), now).ok();
+		});
 	    },
 
 	    frame::Frame::RepairHeader {
@@ -8033,6 +8062,9 @@ impl Connection {
 		    .or_insert_with(||
 			Tetrys::new(fec_payload_length).unwrap());
 		f.decoder.add_source_symbol(sid, fec_protected_payload.as_slice()).unwrap();
+		qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+		    q.add_event_data_with_instant(f.encoder.qlog_event(), now).ok();
+		});
 		// self.fec.get_mut(&fec_session).unwrap()
 		//     .decoder.add_source_symbol(sid, fec_protected_payload.as_slice()).unwrap();
 	    },
@@ -8054,8 +8086,9 @@ impl Connection {
 				    Tetrys::new(fec_payload_length)
 				    .unwrap());
 		f.encoder.handle_ack(next_source_symbol);
-
-		//self.fec.get_mut(&fec_session).unwrap().encoder.handle_ack(next_source_symbol);
+		qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+		    q.add_event_data_with_instant(f.encoder.qlog_event(), now).ok();
+		});
 	    },
 	    
 	    frame::Frame::FECWindow {

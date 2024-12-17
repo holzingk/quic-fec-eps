@@ -312,6 +312,13 @@ pub enum RecoveryEventType {
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "snake_case")]
+pub enum FecEventType {
+    DecoderMetricsUpdated,
+    EncoderMetricsUpdated,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum CongestionStateUpdatedTrigger {
     PersistentCongestion,
     Ecn,
@@ -817,6 +824,27 @@ pub struct PacketLost {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct MarkedForRetransmit {
     pub frames: Vec<QuicFrame>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct DecoderMetricsUpdated {
+    pub recovered: u64,
+    pub rx_ss: u64,
+    pub rx_rs: u64,
+    pub window_ss: u64,
+    pub window_rs: u64,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct EncoderMetricsUpdated {
+    pub in_flight_rs: u64,
+    pub in_flight_ss: u64,
+    pub in_flight: u64,
+    pub tx_ss: u64,
+    pub tx_rs: u64,
+    pub tx_re_ss: u64,
 }
 
 #[cfg(test)]
