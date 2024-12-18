@@ -382,8 +382,9 @@ impl Decoder {
     }
 
     /// Returns qlog event
-    pub fn qlog_event(&self) -> EventData {
+    pub fn qlog_event(&self, fec_id: u64) -> EventData {
 	qlog::events::EventData::DecoderMetricsUpdated(qlog::events::quic::DecoderMetricsUpdated {
+	    fec_id,
 	    recovered: self.recovered,
 	    rx_ss: self.received_source_symbols,
 	    rx_rs: self.received_repair_symbols,

@@ -829,6 +829,7 @@ pub struct MarkedForRetransmit {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct DecoderMetricsUpdated {
+    pub fec_id: u64,
     pub recovered: u64,
     pub rx_ss: u64,
     pub rx_rs: u64,
@@ -839,6 +840,8 @@ pub struct DecoderMetricsUpdated {
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct EncoderMetricsUpdated {
+    pub fec_id: u64,
+    pub app_limited: bool,
     pub in_flight_rs: u64,
     pub in_flight_ss: u64,
     pub in_flight: u64,

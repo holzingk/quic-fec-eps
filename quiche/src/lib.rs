@@ -2882,11 +2882,11 @@ impl Connection {
 
 	// Try to restore frames using FEC
 	let mut restored = Vec::new();
-	for (_, tetrys) in self.fec.iter_mut() {
+	for (fec_id, tetrys) in self.fec.iter_mut() {
 	    let mut decoded = tetrys.decoder.try_decode();
 	    if !decoded.is_empty() {
-		qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-		    q.add_event_data_with_instant(tetrys.decoder.qlog_event(), now).ok();
+		qlog_with_type!(QLOG_FEC_DECODER, self.qlog, q, {
+		    q.add_event_data_with_instant(tetrys.decoder.qlog_event(*fec_id), now).ok();
 		});
 	    }
 	    restored.append(&mut decoded);
@@ -3647,7 +3647,7 @@ impl Connection {
 			    Some(tetrys) => {
 				tetrys.encoder.on_detected_source_symbol_loss(sid);
 				qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(fec_session), now).ok();
 				})},
 			    None => warn!("Detected loss of unknown fec session {fec_session}"),
 			}
@@ -3659,7 +3659,7 @@ impl Connection {
 			    Some(tetrys) => {
 				tetrys.encoder.on_detected_repair_symbol_loss();
 				qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(fec_session), now).ok();
 				})},
 			    None => warn!("Detected loss of unknown fec session {fec_session}"),
 			}
@@ -4399,7 +4399,16 @@ impl Connection {
 	    // if there are no outstanding data
 	    if !writable_stream.send.ready() {
 		trace!("Stream {writable_stream_id} is flushed");
-		self.fec.get_mut(&writable_stream_id).map(|tetrys| tetrys.encoder.notify_flushed());
+		match self.fec.get_mut(&writable_stream_id) {
+		    Some(tetrys) => {
+			if tetrys.encoder.notify_flushed() {
+			    qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+				q.add_event_data_with_instant(tetrys.encoder.qlog_event(writable_stream_id), now).ok();
+			    });
+			}
+		    },
+		    None => trace!("Stream is not a FEC stream, will not notify about being flushed"),
+		};
 	    }
 	}
 	
@@ -4437,7 +4446,7 @@ impl Connection {
 				in_flight = true;
 				tetrys.encoder.put_repair_symbol_in_flight(highest_sid);
 				qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(*fec_session), now).ok();
 				});
 			    }
 			} else {
@@ -4463,7 +4472,7 @@ impl Connection {
 				in_flight = true;
 				tetrys.encoder.put_retransmitted_source_symbol_in_flight(sid);
 				qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(*fec_session), now).ok();
 				});
 			    }
 			} else {
@@ -4694,8 +4703,12 @@ impl Connection {
 			.encoder
 			.add_source_symbol(&b.as_ref()[fec_hdr_len..(fec_hdr_len + stream_hdr_len + len)])
 			.unwrap();
+		    if fin {
+			// this stream is flushed when a fin is sent
+			let _ = tetrys.encoder.notify_flushed();
+		    }
 		    qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-			q.add_event_data_with_instant(tetrys.encoder.qlog_event(), now).ok();
+			q.add_event_data_with_instant(tetrys.encoder.qlog_event(stream_id), now).ok();
 		    });
 		}
 
@@ -8039,8 +8052,8 @@ impl Connection {
 					    seed as u16,
 					    data.as_slice())
 		    .unwrap();
-		qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-		    q.add_event_data_with_instant(f.encoder.qlog_event(), now).ok();
+		qlog_with_type!(QLOG_FEC_DECODER, self.qlog, q, {
+		    q.add_event_data_with_instant(f.decoder.qlog_event(fec_session), now).ok();
 		});
 	    },
 
@@ -8062,8 +8075,8 @@ impl Connection {
 		    .or_insert_with(||
 			Tetrys::new(fec_payload_length).unwrap());
 		f.decoder.add_source_symbol(sid, fec_protected_payload.as_slice()).unwrap();
-		qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-		    q.add_event_data_with_instant(f.encoder.qlog_event(), now).ok();
+		qlog_with_type!(QLOG_FEC_DECODER, self.qlog, q, {
+		    q.add_event_data_with_instant(f.decoder.qlog_event(fec_session), now).ok();
 		});
 		// self.fec.get_mut(&fec_session).unwrap()
 		//     .decoder.add_source_symbol(sid, fec_protected_payload.as_slice()).unwrap();
@@ -8087,7 +8100,7 @@ impl Connection {
 				    .unwrap());
 		f.encoder.handle_ack(next_source_symbol);
 		qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-		    q.add_event_data_with_instant(f.encoder.qlog_event(), now).ok();
+		    q.add_event_data_with_instant(f.encoder.qlog_event(fec_session), now).ok();
 		});
 	    },
 	    

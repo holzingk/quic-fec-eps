@@ -84,18 +84,21 @@ pub struct Encoder {
 impl Encoder {
 
     /// Return qlog event
-    pub fn qlog_event(&self) -> EventData {
+    pub fn qlog_event(&self, fec_id: u64) -> EventData {
 	let in_flight_rs = self.in_flight_rs.iter()
 	    .fold(0, |acc, (_sid, &count)| acc + count);
 	let in_flight_ss = self.sliding_window.len() as u64;
 	let in_flight = in_flight_rs + in_flight_ss;
 	qlog::events::EventData::EncoderMetricsUpdated(qlog::events::quic::EncoderMetricsUpdated {
+	    fec_id,
+	    app_limited: self.app_limited,
 	    in_flight_rs,
 	    in_flight_ss,
 	    in_flight,
 	    tx_ss: self.sent_source_symbols,
 	    tx_rs: self.sent_repair_symbols,
 	    tx_re_ss: self.retransmitted_source_symbols,
+	    left_for_loss_recovery: self.lost,
 	})
     }
     
@@ -137,7 +140,8 @@ impl Encoder {
     }
 
     /// Informs that the stream as no data left to send, might be the begin of a new app limited phase
-    pub fn notify_flushed(&mut self) {
+    /// Returns true if information was new
+    pub fn notify_flushed(&mut self) -> bool {
 	if self.app_limited == false {
 	    self.app_limited = true;
 
@@ -152,10 +156,12 @@ impl Encoder {
 		    (p * stats.in_flight as f64) as u64
 		}
 	    };
+	    return true;
 	}
+	false
     }
 
-        /// Returns the kind of symbol that should be sent in the next packet
+    /// Returns the kind of symbol that should be sent in the next packet
     pub fn should_send_next(&self) -> SymbolKind {
 	// recovery has highest priority
 	if self.lost > 0 {
@@ -337,9 +343,9 @@ impl Encoder {
 
     /// To be called if repair symbol actually is sent
     pub fn put_repair_symbol_in_flight(&mut self, largest_symbol_id: u64) {
+	self.sent_repair_symbols += 1;
 	if self.lost >  0 {
 	    self.lost = self.lost.saturating_sub(1);
-	    self.sent_repair_symbols += 1;
 	    trace!("Encoder recovering loss with a repair symbol");
 	} else if self.left_for_tail_protection > 0 {
 	    self.left_for_tail_protection -= 1;
