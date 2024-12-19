@@ -367,6 +367,14 @@ impl Encoder {
 	self.in_flight_rs.retain(|&sid, _count| sid >= next_missing_symbol_id);
     }
 
+    /// Returns current lower bound used for encoding packets
+    pub fn get_lower_bound(&self) -> u64 {
+	self.sliding_window
+	    .front()
+	    .map(|ss| ss.get_source_symbol_id())
+	    .unwrap_or(0)
+    }
+
     /// Returns the current size of the sliding window.
     pub fn buffered_symbols(&self) -> usize {
         self.sliding_window.len()

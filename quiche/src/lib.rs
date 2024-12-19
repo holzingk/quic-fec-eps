@@ -3971,7 +3971,8 @@ impl Connection {
 	if add_symbol_ack_frame && pkt_type == packet::Type::Short {
 	    for (fec_session, tetrys) in self.fec.iter_mut() {
 		let next_source_symbol = tetrys.decoder.get_ack();
-		let frame = frame::Frame::SymbolAck { fec_session: *fec_session, next_source_symbol };
+		let lower_bound = tetrys.encoder.get_lower_bound();
+		let frame = frame::Frame::SymbolAck { fec_session: *fec_session, next_source_symbol, lower_bound };
 		push_frame_to_pkt!(b, frames, frame, left);
 	    }
 	}
@@ -8091,6 +8092,7 @@ impl Connection {
 	    frame::Frame::SymbolAck {
 		fec_session,
 		next_source_symbol,
+		lower_bound,
 	    } => {
 		trace!("{} received SymbolAck number {next_source_symbol}", self.trace_id);
 		let fec_payload_length = self.max_send_udp_payload_size() as u16 - 75;
@@ -8099,6 +8101,7 @@ impl Connection {
 				    Tetrys::new(fec_payload_length)
 				    .unwrap());
 		f.encoder.handle_ack(next_source_symbol);
+		f.decoder.add_encoder_lower_bound(lower_bound);
 		qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
 		    q.add_event_data_with_instant(f.encoder.qlog_event(fec_session), now).ok();
 		});

@@ -848,6 +848,7 @@ pub struct EncoderMetricsUpdated {
     pub tx_ss: u64,
     pub tx_rs: u64,
     pub tx_re_ss: u64,
+    pub left_for_loss_recovery: u64,
 }
 
 #[cfg(test)]

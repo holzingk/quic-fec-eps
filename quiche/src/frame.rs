@@ -235,6 +235,7 @@ pub enum Frame {
     SymbolAck {
 	fec_session: u64,
 	next_source_symbol: u64,
+	lower_bound: u64,
     },
 
     FECWindow{
@@ -425,10 +426,12 @@ impl Frame {
 	    0x32a80fecac => {
 		let fec_session = b.get_varint()?;
 		let next_source_symbol = b.get_varint()?;
-		trace!("Decoded SymbolAck {next_source_symbol}");
+		let lower_bound = b.get_varint()?;
+		trace!("Decoded SymbolAck {next_source_symbol} lower bound {lower_bound}");
 		Frame::SymbolAck {
 		    fec_session,
 		    next_source_symbol,
+		    lower_bound,
 		}
 	    },
 
@@ -770,11 +773,13 @@ impl Frame {
 	    Frame::SymbolAck {
 		fec_session,
 		next_source_symbol,
+		lower_bound,
 	    } => {
-		trace!("Writing SymbolAck fec_session {fec_session}: {next_source_symbol}");
+		trace!("Writing SymbolAck fec_session {fec_session}: {next_source_symbol}, lower bound: {lower_bound}");
 		b.put_varint(0x32a80fecac)?;
 		b.put_varint(*fec_session)?;
 		b.put_varint(*next_source_symbol)?;
+		b.put_varint(*lower_bound)?;
 	    },
 
 	    Frame::FECWindow {
@@ -1078,11 +1083,13 @@ impl Frame {
 
 	    Frame::SymbolAck {
 		fec_session,
-		next_source_symbol
+		next_source_symbol,
+		lower_bound,
 	    } => {
 		4 + // frame type
 		    octets::varint_len(*fec_session) +
-		    octets::varint_len(*next_source_symbol)
+		    octets::varint_len(*next_source_symbol) +
+		    octets::varint_len(*lower_bound)
 	    },
 
 	    Frame::FECWindow {
@@ -1625,9 +1632,10 @@ impl std::fmt::Debug for Frame {
 
 	    Frame::SymbolAck {
 		fec_session,
-		next_source_symbol
+		next_source_symbol,
+		lower_bound,		    
 	    } => {
-		write!(f, "SYMBOL ACK fec_session={fec_session} next_source_symbol={next_source_symbol:x}")?;
+		write!(f, "SYMBOL ACK fec_session={fec_session} next_source_symbol={next_source_symbol}, lower_bound={lower_bound}")?;
 	    },
 
 	    Frame::FECWindow {

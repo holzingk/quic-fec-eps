@@ -274,7 +274,7 @@ impl RepairSymbols {
     }
 
     /// Returns the smallest source symbol that is still referenced after the GC
-    fn collect_garbage(&mut self, smallest_missing_sid: u64) -> u64 {
+    fn collect_garbage(&mut self, smallest_missing_sid: u64) -> Option<u64> {
 	//trace!("Window before GC is {:?}", self.window);
         // neues hashset anlegen: alle rids rausfinden die unterhalb der kleinsten vermissten sid liegen
         let mut below: HashSet<u64> = HashSet::new();
@@ -313,12 +313,10 @@ impl RepairSymbols {
         self.first_sid_in_window()
     }
 
-    fn first_sid_in_window(&self) -> u64 {
-        let (first_sid, _) = self
-            .window
+    fn first_sid_in_window(&self) -> Option<u64> {
+        self.window
             .first_key_value()
-            .unwrap_or((&0, &HashSet::new()));
-        *first_sid
+	    .map(|(k, v)| *k)
     }
 
     // fn get_symbols(&mut self) -> impl Iterator<Item = &mut RepairSymbol> {
@@ -356,6 +354,7 @@ pub struct Decoder {
     received_source_symbols: u64,
     received_repair_symbols: u64,
     safc: SymbolAckFrequencyController,
+    encoder_lower_bound: Option<u64>,
 }
 
 impl Decoder {
@@ -370,6 +369,7 @@ impl Decoder {
 	    received_source_symbols: 0,
 	    received_repair_symbols: 0,
             safc: SymbolAckFrequencyController::new(),
+	    encoder_lower_bound: None,
         })
     }
 
@@ -427,7 +427,7 @@ impl Decoder {
         let ack_sid = self.source_symbols.next_missing_sid();
         ack_sid
     }
-
+    
     /// Tries to decode something
     pub fn try_decode(&mut self) -> Vec<Vec<u8>> {
         let mut ret = Vec::new();
@@ -755,15 +755,24 @@ impl Decoder {
 	ret
     }
 
+    /// Informs decoder that no SIDs lower than lower_bounds are expected anymore
+    pub fn add_encoder_lower_bound(&mut self, lower_bound: u64) {
+	self.encoder_lower_bound = Some(lower_bound);
+    }
+    
     /// cleans up repair symbols and source symbols that cannot be used anymore to return SIDs >= next symbol id
     /// todo: noop if no substantial change occurred
     fn collect_garbage(&mut self) {
 	let ss_next_missing = self.source_symbols.next_missing_sid();
-        let smallest_needed = self
-            .repair_symbols
-            .collect_garbage(ss_next_missing);
-	trace!("Dropping source symbols smaller than {smallest_needed}, next_missing ss is {ss_next_missing}");
-        self.source_symbols.drop_symbols_older_than(smallest_needed);
+        match self.repair_symbols.collect_garbage(ss_next_missing) {
+	    Some(smallest_needed) => {
+		trace!("Dropping source symbols smaller than {smallest_needed}, next_missing ss is {ss_next_missing}");
+		self.source_symbols.drop_symbols_older_than(smallest_needed);
+	    },
+	    None => {
+		self.source_symbols.drop_symbols_older_than(self.encoder_lower_bound.unwrap_or(0));
+	    },
+	}
     }
 
     fn decoding_necessary(&self) -> bool {
