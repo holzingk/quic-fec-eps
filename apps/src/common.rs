@@ -48,7 +48,7 @@ use ring::rand::SecureRandom;
 
 use quiche::ConnectionId;
 
-use quiche::h3::NameValue;
+use quiche::h3::{NameValue};
 use quiche::h3::Priority;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1574,17 +1574,17 @@ impl HttpConn for Http3Conn {
                         ));
                     }
 
-		    trace!("Priority is {}", String::from_utf8(priority.to_owned()).unwrap());
+		            trace!("Priority is {}", String::from_utf8(priority.to_owned()).unwrap());
 		    
                     #[cfg(feature = "sfv")]
-                    let priority =
+                    let mut priority =
                         match quiche::h3::Priority::try_from(priority.as_slice())
                         {
                             Ok(v) => v,
                             Err(_) => {
-				trace!("Using default priority");
-				quiche::h3::Priority::default()
-			    },
+				                error!("EPS parsing failed, using default priority");
+				                quiche::h3::Priority::default()
+                            },
                         };
 
                     #[cfg(not(feature = "sfv"))]
@@ -1598,7 +1598,7 @@ impl HttpConn for Http3Conn {
                     );
 
                     match self.h3_conn.send_response_with_priority(
-                        conn, stream_id, &headers, &priority, false,
+                        conn, stream_id, &headers, &mut priority, false,
                     ) {
                         Ok(v) => v,
 
@@ -1720,7 +1720,7 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
-        debug!("{} stream {} is writable", conn.trace_id(), stream_id);
+        trace!("{} stream {} is writable", conn.trace_id(), stream_id);
 
         if !partial_responses.contains_key(&stream_id) {
             return;
@@ -1728,7 +1728,7 @@ impl HttpConn for Http3Conn {
 
         let resp = partial_responses.get_mut(&stream_id).unwrap();
 
-        if let (Some(headers), Some(priority)) = (&resp.headers, &resp.priority) {
+        if let (Some(headers), Some(priority)) = (&resp.headers, &mut resp.priority) {
             match self.h3_conn.send_response_with_priority(
                 conn, stream_id, headers, priority, false,
             ) {

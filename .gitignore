@@ -2,3 +2,7 @@
 **/*.rs.bk
 **/Cargo.lock
 **/*.*qlog
+.idea/
+log-client.txt
+log-server.txt
+run-client-server-local.sh

@@ -323,14 +323,12 @@ use qlog::events::EventType;
 /// ../struct.Config.html#method.set_application_protos
 pub const APPLICATION_PROTOCOL: &[&[u8]] = &[b"h3"];
 
-// The offset used when converting HTTP/3 urgency to quiche urgency.
-const PRIORITY_URGENCY_OFFSET: u8 = 124;
-
 // Parameter values as specified in [Extensible Priorities].
 //
 // [Extensible Priorities]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
-const PRIORITY_URGENCY_LOWER_BOUND: u8 = 0;
-const PRIORITY_URGENCY_UPPER_BOUND: u8 = 7;
+pub(crate) const PRIORITY_URGENCY_LOWER_BOUND: u8 = 0;
+
+pub(crate) const PRIORITY_URGENCY_UPPER_BOUND: u8 = 7;
 const PRIORITY_URGENCY_DEFAULT: u8 = 3;
 const PRIORITY_INCREMENTAL_DEFAULT: bool = false;
 
@@ -733,18 +731,16 @@ fn eps_parse_incremental(bitem: Option<&sfv::BareItem>) -> std::result::Result<b
 #[cfg(feature = "sfv")]
 fn eps_parse_weight(bitem: Option<&sfv::BareItem>) -> std::result::Result<u32, crate::h3::Error> {
     match bitem {
-	None => Ok(0),
-	Some(bi) => match bi.as_decimal() {
-	    Some(v) => {
-		let f = v.to_f64().ok_or(Error::Done)?;
-		if f > 0.0 && f < 1.0 {
-		    Ok((f * 1000.0) as u32)
-		} else {
-		    Err(Error::Done)
-		}
-	    },
-	    None => Err(Error::Done),
-	}
+	    None => Ok(1000),
+	    Some(bi) => match bi.as_decimal() {
+            Some(v) => {
+                match v.to_f64() {
+                    Some(v) => Ok((v * 1000.0) as u32),
+                    None => Err(Error::Done),
+                }
+            },
+            None => Err(Error::Done),
+        }
     }
 }
 
@@ -819,28 +815,32 @@ pub struct Priority(pub Vec<PriorityValues>);
 #[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct PriorityValues {
+    /// Urgency, ranging from 0-7, where 0 is the highest urgency.
     pub urgency: u8,
+    /// Whether the stream can be processed online or should be received in full.
     pub incremental: bool,
+    /// Relative weight of the class in the stream hierarchy.
     pub weight: u32,
+    /// The internal class' ID.
     pub id: Option<String>,
-    // in promille, cannot implement Eq for float types
+    /// Protectio ratio in promille (cannot implement Eq for float types).
     pub protection_ratio: u32,
+    /// The burst loss tolerance.
     pub burst_loss_tolerance: u32,
-    // in promille, cannot implement Eq for float types
+    /// The repair delay tolerance in promille (cannot implement Eq for float types).
     pub repair_delay_tolerance: u32,
 }
-
 
 impl Default for PriorityValues {
     fn default() -> Self {
         Self {
             urgency: PRIORITY_URGENCY_DEFAULT,
             incremental: PRIORITY_INCREMENTAL_DEFAULT,
-	    weight: 0,
-	    id: None,
-	    protection_ratio: 0,
-	    burst_loss_tolerance: 0,
-	    repair_delay_tolerance: 0,
+            weight: 1000,
+            id: None,
+            protection_ratio: 0,
+            burst_loss_tolerance: 0,
+            repair_delay_tolerance: 0,
         }
     }
 }
@@ -854,10 +854,10 @@ impl Default for Priority {
 impl PriorityValues {
     /// Creates a new Priority.
     pub fn new(urgency: u8, incremental: bool) -> Self {
-	let mut prio: Self = Default::default();
-	prio.urgency = urgency;
-	prio.incremental = incremental;
-	prio
+        let mut prio: Self = Default::default();
+        prio.urgency = urgency;
+        prio.incremental = incremental;
+        prio
     }
 
     /// Creates a new Priority with experimental parameters
@@ -888,11 +888,10 @@ impl Priority {
 
     /// Creates a new priority, legacy constructor
     pub fn new(urgency: u8, incremental: bool) -> Self {
-	Self::new_hierarchical(
-	    vec!(PriorityValues::new(
-		urgency, incremental)))	
-    }
-
+        Self::new_hierarchical(
+            vec!(PriorityValues::new(
+            urgency, incremental)))
+        }
 }
 
 #[cfg(feature = "sfv")]
@@ -916,102 +915,114 @@ impl TryFrom<&[u8]> for Priority {
     ///
     /// [Extensible Priorities]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     fn try_from(value: &[u8]) -> std::result::Result<Self, Self::Error> {
-	let dict = match sfv::Parser::parse_dictionary(value) {
-            Ok(v) => v,
+        debug!("Unparsed EPS field value = {:?}", value);
 
-            Err(_) => return Err(Error::Done),
-        };
+        let dict =
+            match sfv::Parser::parse_dictionary(value) {
+                Ok(v) => v,
+                Err(_) => return Err(Error::Done),
+            };
 
-	let mut prio = Vec::new();
-	
-	let urgency = match dict.get("u") {
-            // If there is a u parameter, try to read it as an Item of type
-            // Integer. If the value out of the spec's allowed range
-            // (0 through 7), that's an error so set it to the upper
-            // bound (lowest priority) to avoid interference with
-            // other streams.
-            Some(sfv::ListEntry::Item(item)) => eps_parse_urgency(Some(&item.bare_item))?,
+        let mut prio = Vec::new();
+
+        let urgency = match dict.get("u") {
+                // If there is a u parameter, try to read it as an Item of type
+                // Integer. If the value out of the spec's allowed range
+                // (0 through 7), that's an error so set it to the upper
+                // bound (lowest priority) to avoid interference with
+                // other streams.
+                Some(sfv::ListEntry::Item(item)) => eps_parse_urgency(Some(&item.bare_item))?,
+                Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+                // Omitted so use default value.
+                None => eps_parse_urgency(None)?,
+            };
+
+            let incremental = match dict.get("i") {
+                Some(sfv::ListEntry::Item(item)) =>
+            eps_parse_incremental(Some(&item.bare_item))?,
+
+                // Omitted so use default value.
+                 _ => eps_parse_incremental(None)?,
+            };
+
+        let weight = match dict.get("exp_w") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_weight(Some(&item.bare_item))?,
             Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-            // Omitted so use default value.
-            None => eps_parse_urgency(None)?,
+            // Omitted, let's use default
+            None => eps_parse_weight(None)?,
         };
 
-        let incremental = match dict.get("i") {
-            Some(sfv::ListEntry::Item(item)) =>
-		eps_parse_incremental(Some(&item.bare_item))?,
-
-            // Omitted so use default value.
-             _ => eps_parse_incremental(None)?,
+        let protection_ratio = match dict.get("exp_r") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_protection_ratio(Some(&item.bare_item))?,
+            Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+            // Omitted, let's use default
+            None => eps_parse_protection_ratio(None)?,
         };
 
-	let weight = match dict.get("exp_w") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_weight(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // Omitted, let's use default
-	    None => eps_parse_weight(None)?,
-	};
+        let burst_loss_tolerance = match dict.get("exp_b") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_burst_loss_tolerance(Some(&item.bare_item))?,
+            Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+            // In case it's empty, use default
+            None => eps_parse_burst_loss_tolerance(None)?,
+        };
 
-	let protection_ratio = match dict.get("exp_r") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_protection_ratio(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // Omitted, let's use default
-	    None => eps_parse_protection_ratio(None)?,
-	};
+        let repair_delay_tolerance = match dict.get("exp_alpha") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_repair_delay_tolerance(Some(&item.bare_item))?,
+            Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+            // Omitted, let's use default
+            None => eps_parse_repair_delay_tolerance(None)?,
+        };
 
-	let burst_loss_tolerance = match dict.get("exp_b") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_burst_loss_tolerance(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // In case it's empty, use default
-	    None => eps_parse_burst_loss_tolerance(None)?,
-	};
+        let id = match dict.get("exp_id") {
+            Some(sfv::ListEntry::Item(item)) => eps_parse_id(Some(&item.bare_item))?,
+            Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
+            // Omitted,
+            None => eps_parse_id(None)?,
+        };
 
-	let repair_delay_tolerance = match dict.get("exp_alpha") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_repair_delay_tolerance(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // Omitted, let's use default
-	    None => eps_parse_repair_delay_tolerance(None)?,
-	};
+        prio.push(PriorityValues::new_experimental(
+            urgency, incremental, weight,  id, protection_ratio,
+            burst_loss_tolerance,
+            repair_delay_tolerance));
 
-	let id = match dict.get("exp_id") {
-	    Some(sfv::ListEntry::Item(item)) => eps_parse_id(Some(&item.bare_item))?,
-	    Some(sfv::ListEntry::InnerList(_)) => return Err(Error::Done),
-	    // Omitted,
-	    None => eps_parse_id(None)?,
-	};
-	
-	prio.push(PriorityValues::new_experimental(
-	    urgency, incremental, weight,  id, protection_ratio, 
-	    burst_loss_tolerance,
-	    repair_delay_tolerance));
+        trace!("Pushed experimental priority values.");
 
-	match dict.get("exp_p") {
-	    // no path attribute
-	    None => {},
-	    Some(sfv::ListEntry::Item(_)) => return Err(Error::Done),
-	    Some(sfv::ListEntry::InnerList(ilist)) => {
-		for item in &ilist.items {
-		    let id = item.bare_item.as_str().map(|v| v.to_owned());
-		    
-		    let urgency = eps_parse_urgency(item.params.get("u"))?;
-		    
-		    let incremental = eps_parse_incremental(item.params.get("i"))?;
-		    let weight = eps_parse_weight(item.params.get("exp_w"))?;
-		    let protection_ratio = eps_parse_protection_ratio(item.params.get("exp_r"))?;
-		    let burst_loss_tolerance = eps_parse_burst_loss_tolerance(item.params.get("exp_b"))?;
-		    let repair_delay_tolerance = eps_parse_repair_delay_tolerance(item.params.get("exp_alpha"))?;
+        match dict.get("exp_p") {
+            // no path attribute
+            None => {
+                trace!("No exp_p path attribute found!");
+            },
+            Some(sfv::ListEntry::Item(_)) => {
+                trace!("exp_p list entry item: Done");
+                return Err(Error::Done)
+            },
+            Some(sfv::ListEntry::InnerList(ilist)) => {
+                trace!("Parsing exp_p inner list");
+                for item in &ilist.items {
+                    trace!("{:?}", item);
+                    let id = item.bare_item.as_str().map(|v| v.to_owned());
 
-		    prio.push(PriorityValues::new_experimental(
-			    urgency,
-                incremental,
-			    weight,
-			    id,
-                protection_ratio,
-			    burst_loss_tolerance,
-			    repair_delay_tolerance));
-		    }
-	    }
-	}
-	Ok(Self::new_hierarchical(prio))
+                    let urgency = eps_parse_urgency(item.params.get("u"))?;
+
+                    let incremental = eps_parse_incremental(item.params.get("i"))?;
+                    let weight = eps_parse_weight(item.params.get("exp_w"))?;
+                    let protection_ratio = eps_parse_protection_ratio(item.params.get("exp_r"))?;
+                    let burst_loss_tolerance = eps_parse_burst_loss_tolerance(item.params.get("exp_b"))?;
+                    let repair_delay_tolerance = eps_parse_repair_delay_tolerance(item.params.get("exp_alpha"))?;
+
+                    prio.push(PriorityValues::new_experimental(
+                        urgency,
+                        incremental,
+                        weight,
+                        id,
+                        protection_ratio,
+                        burst_loss_tolerance,
+                        repair_delay_tolerance));
+                    }
+            }
+        }
+
+        Ok(Self::new_hierarchical(prio))
     }
 }
 
@@ -1245,10 +1256,11 @@ impl Connection {
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
         fin: bool,
     ) -> Result<()> {
-        let priority = Default::default();
+        // Needs to be mutable to clamp urgency.
+        let mut priority = Default::default();
 
         self.send_response_with_priority(
-            conn, stream_id, headers, &priority, fin,
+            conn, stream_id, headers, &mut priority, fin,
         )?;
 
         Ok(())
@@ -1270,23 +1282,18 @@ impl Connection {
     /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     pub fn send_response_with_priority<T: NameValue>(
         &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
-        priority: &Priority, fin: bool,
+        priority: &mut Priority, fin: bool,
     ) -> Result<()> {
         if !self.streams.contains_key(&stream_id) {
             return Err(Error::FrameUnexpected);
         }
 
-        // Clamp and shift urgency into quiche-priority space
-        let urgency = priority
-	    .0[0]
-            .urgency
-            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
-            PRIORITY_URGENCY_OFFSET;
+        let urgency = priority.0[0].urgency;
+        priority.0[0].urgency = urgency;
 
-        conn.stream_priority(stream_id, urgency, priority.0[0].incremental)?;
+        conn.stream_priority(stream_id, priority)?;
 
         self.send_headers(conn, stream_id, headers, fin)?;
-
         Ok(())
     }
 
@@ -1639,10 +1646,7 @@ impl Connection {
         let control_stream_id =
             self.control_stream_id.ok_or(Error::FrameUnexpected)?;
 
-        let urgency = priority
-	    .0[0]
-            .urgency
-            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND);
+        let urgency = priority.0[0].urgency;
 
         let mut field_value = format!("u={urgency}");
 
@@ -1939,7 +1943,8 @@ impl Connection {
             stream::HTTP3_CONTROL_STREAM_TYPE_ID |
             stream::QPACK_ENCODER_STREAM_TYPE_ID |
             stream::QPACK_DECODER_STREAM_TYPE_ID => {
-                conn.stream_priority(stream_id, 0, false)?;
+                let mut priority = Priority::new(0, false);
+                conn.stream_priority(stream_id, &mut priority)?;
             },
 
             // TODO: Server push
@@ -1947,7 +1952,8 @@ impl Connection {
 
             // Anything else is a GREASE stream, so make it the least important.
             _ => {
-                conn.stream_priority(stream_id, 255, false)?;
+                let mut priority = Priority::new(255, false);
+                conn.stream_priority(stream_id, &mut priority)?;
             },
         }
 
@@ -3286,8 +3292,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use crate::hls_scheduler::eps_to_hls;
-    use crate::HLSHierarchy;
+    use crate::{HLSHierarchy, HLSScheduler};
     use super::*;
 
     use super::testing::*;
@@ -4218,13 +4223,112 @@ mod tests {
 	    // Hierarchical prio
         assert_eq!(
             Ok(Priority::new_hierarchical(
-            vec!(
-                // leaf
-                PriorityValues::new_experimental(2, true, 600, None, 20, 0, 100),
-                // middle layer
-                PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))
+                vec!(
+                    // leaf
+                    PriorityValues::new_experimental(2, true, 600, None, 20, 0, 100),
+                    // middle layer
+                    PriorityValues::new_experimental(3, true, 800, Some("b".to_string()), 0, 0 , 0)))
             ),
             Priority::try_from(b"u=2, exp_w=0.6, i, exp_r=0.02, exp_alpha=0.1, exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice()));
+
+        // Deep hierarchical prio
+        assert_eq!(
+            Ok(Priority::new_hierarchical(
+                vec!(
+                    // leaf
+                    PriorityValues::new_experimental(0, true, 1000, None, 0, 0, 0),
+                    // middle layer
+                    PriorityValues::new_experimental(1, false, 1000, Some("b".to_string()), 0, 0 , 0),
+                    PriorityValues::new_experimental(2, false, 2000, Some("c".to_string()), 0, 0 , 0)))
+            ),
+            Priority::try_from(b"u=0, i, exp_p=(\"b\";u=1;exp_w=1.0 \"c\";u=2;exp_w=2.0)".as_slice()));
+    }
+
+    #[test]
+    pub fn hls_bfs_priority_order() {
+        // Stream IDs
+        let stream_a1 = 0;
+        let stream_a2 = 4;
+        let stream_b1 = 8;
+        let stream_b2 = 12;
+        let stream_c = 16;
+
+        let mut hierarchy = HLSHierarchy::new();
+
+        // Build tree in a top-down manner, reflecting EPS parsing.
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
+        let a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
+        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+
+        let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
+        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+
+        let c = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(root));
+
+        hierarchy.set_stream_id(a1, stream_a1);
+        hierarchy.set_stream_id(a2, stream_a2);
+        hierarchy.set_stream_id(b1, stream_b1);
+        hierarchy.set_stream_id(b2, stream_b2);
+        hierarchy.set_stream_id(c, stream_c);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_a1, stream_a2, stream_b1, stream_b2, stream_c]);
+
+        // Only C should be scheduled.
+        assert_eq!(active_streams.len(), 1);
+        assert!(active_streams.contains(&stream_c));
+
+        // Now, simulate C finishing the transmission and leaving the hierarchy.
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
+        let a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
+        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+
+        let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
+        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+
+        hierarchy.set_stream_id(a1, stream_a1);
+        hierarchy.set_stream_id(a2, stream_a2);
+        hierarchy.set_stream_id(b1, stream_b1);
+        hierarchy.set_stream_id(b2, stream_b2);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_a1, stream_a2, stream_b1, stream_b2]);
+
+        assert_eq!(active_streams.len(), 3);
+        assert!(active_streams.contains(&stream_a1));
+        assert!(active_streams.contains(&stream_b1));
+        assert!(active_streams.contains(&stream_b2));
+
+        // Now, suppose A1 finishes.
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+        let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
+        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
+
+        let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
+        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
+
+        hierarchy.set_stream_id(a2, stream_a2);
+        hierarchy.set_stream_id(b1, stream_b1);
+        hierarchy.set_stream_id(b2, stream_b2);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_a2, stream_b1, stream_b2]);
+
+        assert_eq!(active_streams.len(), 3);
+        assert!(active_streams.contains(&stream_a2));
+        assert!(active_streams.contains(&stream_b1));
+        assert!(active_streams.contains(&stream_b2));
     }
 
     // Sample hierarchy specification, cf. page 9 and 26 of the HLS MA thesis
@@ -4233,7 +4337,7 @@ mod tests {
         let capacity = 10_000;
         let mut hierarchy = HLSHierarchy::new();
 
-        let root_id = hierarchy.insert(1, false, 1, 0, 0, 0, None);
+        let root_id = hierarchy.root;
 
         let x = hierarchy.insert(3, false, 5, 0, 0, 0, Some(root_id));
 
@@ -4246,7 +4350,8 @@ mod tests {
         let z1 = hierarchy.insert(3, false, 2, 0, 0, 0, Some(z));
 
         // Convert relative weights into global ones.
-        hierarchy.generate_guarantees(capacity);
+        hierarchy.capacity = capacity;
+        hierarchy.generate_guarantees();
 
         assert_eq!(hierarchy.class(root_id).guarantee, capacity as i64);
         assert_eq!(hierarchy.class(x).guarantee, 5000);
@@ -4257,27 +4362,6 @@ mod tests {
         assert_eq!(hierarchy.class(x2).guarantee, 2857);
         assert_eq!(hierarchy.class(z1).guarantee, 2000);
     }
-
-    #[test]
-    #[cfg(feature = "sfv")]
-    fn hierarchical_prios_to_hls_tree() {
-
-        // Define stream priorities
-        let a1= Priority::try_from(b"u=1,exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
-        let a2 = Priority::try_from(b"u=2,exp_p=(\"a\";u=3;i;exp_w=0.2)".as_slice());
-
-        let b1 = Priority::try_from(b"u=2,exp_w=0.6,exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
-        let b2 = Priority::try_from(b"u=2,exp_w=0.6,exp_p=(\"b\";u=3;i;exp_w=0.8)".as_slice());
-
-        let c = Priority::try_from(b"u=1".as_slice());
-
-        let priority_values_vector: Vec<Result<Priority>> = vec![a1, a2, b1, b2, c];
-
-        eps_to_hls(priority_values_vector);
-
-        assert_eq!(0, 0);
-    }
-
     #[test]
     /// Send a PRIORITY_UPDATE for request stream from the client.
     fn priority_update_request() {

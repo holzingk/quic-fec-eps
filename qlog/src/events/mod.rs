@@ -517,7 +517,7 @@ pub enum EventData {
     #[serde(rename = "transport:packet_buffered")]
     PacketBuffered(quic::PacketBuffered),
 
-    #[serde(rename = "transport:version_information")]
+    // #[serde(rename = "transport:version_information")]
     PacketsAcked(quic::PacketsAcked),
 
     #[serde(rename = "transport:stream_state_updated")]

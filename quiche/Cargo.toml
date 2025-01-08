@@ -69,6 +69,7 @@ qlog = { version = "0.9", path = "../qlog", optional = true }
 sfv = { version = "0.9", optional = true }
 num-traits = { version = "0.2.19" }
 smallvec = { version = "1.10", features = ["serde", "union"] }
+itertools = "0.13.0"
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = ["wincrypt", "ws2def", "ws2ipdef", "ws2tcpip"] }
