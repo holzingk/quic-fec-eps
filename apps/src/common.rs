@@ -48,7 +48,7 @@ use ring::rand::SecureRandom;
 
 use quiche::ConnectionId;
 
-use quiche::h3::{NameValue};
+use quiche::h3::NameValue;
 use quiche::h3::Priority;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1333,29 +1333,36 @@ impl HttpConn for Http3Conn {
 			 let zeros_front = req.response_body.len()
 			    .next_multiple_of(std::mem::size_of::<u128>()) -
 			    req.response_body.len();
-			let aligned_len = ((read - zeros_front) / std::mem::size_of::<u128>())
-			    * std::mem::size_of::<u128>();
-			let zeros_back = read - aligned_len - zeros_front;
-			let now = SystemTime::now().duration_since(UNIX_EPOCH)
-			    .expect("we are past unix epoch")
-			    .as_micros();
+			if read < zeros_front {
+			    for _ in 0.. read {
+				req.response_body.extend_from_slice(&[0]);
+			    }
+			} else {
+			    let aligned_len = ((read - zeros_front) / std::mem::size_of::<u128>())
+				* std::mem::size_of::<u128>();
+			    let zeros_back = read - aligned_len - zeros_front;
+			    let now = SystemTime::now().duration_since(UNIX_EPOCH)
+				.expect("we are past unix epoch")
+				.as_micros();
 
-			for _ in 0..zeros_front {
-			    req.response_body.extend_from_slice(&[0]);
+			    for _ in 0..zeros_front {
+				req.response_body.extend_from_slice(&[0]);
+			    }
+			    for chunk in buf[zeros_front..(aligned_len + zeros_front)].chunks(std::mem::size_of::<u128>()) {
+				let sent_ts = u128::from_be_bytes(chunk.try_into().unwrap());
+				let first_byte_ts = req.t_first_byte.expect("We already get data, so is Some")
+				    .duration_since(UNIX_EPOCH).expect("we are past unix epoch").as_micros();
+				let now_rel = now.checked_sub(first_byte_ts).expect("no time travel possible");
+				let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
+				let now_rel_bytes = u64::try_from(now_rel).expect("requests don't take long").to_be_bytes();
+				let flight_time_bytes = u64::try_from(flight_time).expect("only short flight times expected").to_be_bytes();
+				req.response_body.extend_from_slice(&now_rel_bytes);
+				req.response_body.extend_from_slice(&flight_time_bytes);
+			    }
+			    for _ in 0..zeros_back {
+				req.response_body.extend_from_slice(&[0]);
+			    }
 			}
-			for chunk in buf[zeros_front..(aligned_len + zeros_front)].chunks(std::mem::size_of::<u128>()) {
-			    let sent_ts = u128::from_be_bytes(chunk.try_into().unwrap());
-			    let now_rel = now.checked_sub(sent_ts).expect("no time travel possible");
-			    let flight_time = now.checked_sub(sent_ts).expect("no time travel possible");
-			    let now_rel_bytes = u64::try_from(now_rel).expect("requests don't take long").to_be_bytes();
-			    let flight_time_bytes = u64::try_from(flight_time).expect("only short flight times expected").to_be_bytes();
-			    req.response_body.extend_from_slice(&now_rel_bytes);
-			    req.response_body.extend_from_slice(&flight_time_bytes);
-			}
-			for _ in 0..zeros_back {
-			    req.response_body.extend_from_slice(&[0]);
-			}
-			
                         // req.response_body.extend_from_slice(&buf[..read]);
 
                         match &mut req.response_writer {
@@ -1574,17 +1581,17 @@ impl HttpConn for Http3Conn {
                         ));
                     }
 
-		            trace!("Priority is {}", String::from_utf8(priority.to_owned()).unwrap());
+		    trace!("Priority is {}", String::from_utf8(priority.to_owned()).unwrap());
 		    
                     #[cfg(feature = "sfv")]
-                    let mut priority =
+                    let priority =
                         match quiche::h3::Priority::try_from(priority.as_slice())
                         {
                             Ok(v) => v,
                             Err(_) => {
-				                error!("EPS parsing failed, using default priority");
-				                quiche::h3::Priority::default()
-                            },
+				trace!("Using default priority");
+				quiche::h3::Priority::default()
+			    },
                         };
 
                     #[cfg(not(feature = "sfv"))]
@@ -1598,7 +1605,7 @@ impl HttpConn for Http3Conn {
                     );
 
                     match self.h3_conn.send_response_with_priority(
-                        conn, stream_id, &headers, &mut priority, false,
+                        conn, stream_id, &headers, &priority, false,
                     ) {
                         Ok(v) => v,
 
@@ -1720,7 +1727,7 @@ impl HttpConn for Http3Conn {
         &mut self, conn: &mut quiche::Connection,
         partial_responses: &mut HashMap<u64, PartialResponse>, stream_id: u64,
     ) {
-        trace!("{} stream {} is writable", conn.trace_id(), stream_id);
+        debug!("{} stream {} is writable", conn.trace_id(), stream_id);
 
         if !partial_responses.contains_key(&stream_id) {
             return;
@@ -1728,7 +1735,7 @@ impl HttpConn for Http3Conn {
 
         let resp = partial_responses.get_mut(&stream_id).unwrap();
 
-        if let (Some(headers), Some(priority)) = (&resp.headers, &mut resp.priority) {
+        if let (Some(headers), Some(priority)) = (&resp.headers, &resp.priority) {
             match self.h3_conn.send_response_with_priority(
                 conn, stream_id, headers, priority, false,
             ) {
