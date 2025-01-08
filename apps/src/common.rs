@@ -1584,7 +1584,7 @@ impl HttpConn for Http3Conn {
 		    trace!("Priority is {}", String::from_utf8(priority.to_owned()).unwrap());
 		    
                     #[cfg(feature = "sfv")]
-                    let priority =
+                    let mut priority =
                         match quiche::h3::Priority::try_from(priority.as_slice())
                         {
                             Ok(v) => v,
@@ -1605,7 +1605,7 @@ impl HttpConn for Http3Conn {
                     );
 
                     match self.h3_conn.send_response_with_priority(
-                        conn, stream_id, &headers, &priority, false,
+                        conn, stream_id, &headers, &mut priority, false,
                     ) {
                         Ok(v) => v,
 
@@ -1735,7 +1735,7 @@ impl HttpConn for Http3Conn {
 
         let resp = partial_responses.get_mut(&stream_id).unwrap();
 
-        if let (Some(headers), Some(priority)) = (&resp.headers, &resp.priority) {
+        if let (Some(headers), Some(priority)) = (&resp.headers, &mut resp.priority) {
             match self.h3_conn.send_response_with_priority(
                 conn, stream_id, headers, priority, false,
             ) {
