@@ -3292,6 +3292,7 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
+    use libm::exp;
     use crate::{HLSHierarchy, HLSScheduler};
     use super::*;
 
@@ -4242,6 +4243,22 @@ mod tests {
                     PriorityValues::new_experimental(2, false, 2000, Some("c".to_string()), 0, 0 , 0)))
             ),
             Priority::try_from(b"u=0, i, exp_p=(\"b\";u=1;exp_w=1.0 \"c\";u=2;exp_w=2.0)".as_slice()));
+    }
+
+    #[test]
+    pub fn level_bfs_root_tests() {
+        // Hierarchy consisting of a single root
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        let out: Vec<Vec<u64>> = scheduler.level_bfs(root);
+        let expected: Vec<Vec<u64>> = vec![vec![0]];
+
+        assert_eq!(out, expected);
+
+        // Root node with two children
+
     }
 
     #[test]

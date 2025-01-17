@@ -825,6 +825,43 @@ impl HLSScheduler {
         }
     }
 
+    // Based on https://en.wikipedia.org/wiki/Level_structure, 2025-01-17
+    pub(crate) fn level_bfs(&mut self, root: u64) -> Vec<Vec<u64>> {
+        // Q ← {r}
+        let mut queue: VecDeque<u64> = VecDeque::new();
+        queue.push_back(root);
+
+        let mut layers : Vec<Vec<u64>> = Vec::new();
+
+        // for ℓ from 0 to ∞:
+        loop {
+            // The set Q holds all vertices at level ℓ - mark them as discovered
+            layers.push(queue.clone().into_iter().collect());
+
+            // Q' ← {}
+            let mut q_prime: VecDeque<u64> = VecDeque::new();
+
+            // for u in Q:
+            while let Some(u) = queue.pop_front() {
+                let children: Vec<u64> = self.hierarchy.children(u).into_iter().collect();
+                // for each edge (u, v):
+                for child in children {
+                    // if v is not yet marked: (no need to check assuming hierarchical structure)
+                    // add v to Q'
+                    q_prime.push_back(child);
+                }
+            }
+
+            if q_prime.is_empty() {
+                break;
+            }
+
+            queue.extend(q_prime);
+        }
+
+        layers
+    }
+
     /// Uses BFS to determine the set of active streams for the current scheduling round.
     /// Returns the stream id.
     pub(crate) fn backlogged_classes_from_hierarchy(&mut self, flushable: Vec<u64>) -> Vec<u64> {
