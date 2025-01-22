@@ -826,12 +826,12 @@ impl HLSScheduler {
     }
 
     // Based on https://en.wikipedia.org/wiki/Level_structure, 2025-01-17
-    pub(crate) fn level_bfs(&mut self, root: u64) -> Vec<Vec<u64>> {
+    pub(crate) fn level_bfs(&mut self, root: u64) -> Vec<HashSet<u64>> {
         // Q ← {r}
         let mut queue: VecDeque<u64> = VecDeque::new();
         queue.push_back(root);
 
-        let mut layers : Vec<Vec<u64>> = Vec::new();
+        let mut layers : Vec<HashSet<u64>> = Vec::new();
 
         // for ℓ from 0 to ∞:
         loop {
@@ -843,7 +843,7 @@ impl HLSScheduler {
 
             // for u in Q:
             while let Some(u) = queue.pop_front() {
-                let children: Vec<u64> = self.hierarchy.children(u).into_iter().collect();
+                let children: HashSet<u64> = self.hierarchy.children(u);
                 // for each edge (u, v):
                 for child in children {
                     // if v is not yet marked: (no need to check assuming hierarchical structure)

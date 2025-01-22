@@ -3292,7 +3292,8 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use libm::exp;
+    use std::collections::HashSet;
+    use std::iter::FromIterator;
     use crate::{HLSHierarchy, HLSScheduler};
     use super::*;
 
@@ -4246,19 +4247,96 @@ mod tests {
     }
 
     #[test]
-    pub fn level_bfs_root_tests() {
-        // Hierarchy consisting of a single root
+    pub fn level_bfs_tests() {
+        // Hierarchy consisting of a single root node
         let mut hierarchy = HLSHierarchy::new();
         let root = hierarchy.root;
         let mut scheduler = HLSScheduler::new(hierarchy);
 
-        let out: Vec<Vec<u64>> = scheduler.level_bfs(root);
-        let expected: Vec<Vec<u64>> = vec![vec![0]];
+        let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
+        let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root])];
 
         assert_eq!(out, expected);
 
-        // Root node with two children
+        // Root with two children
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
 
+        let a = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
+        let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root]), HashSet::from_iter(vec![a, b])];
+
+        assert_eq!(out, expected);
+
+        // Deep hierarchy
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(a));
+        let c = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
+        let d = hierarchy.insert(3, true, 1, 0, 0, 0, Some(c));
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
+        let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root]),
+                                               HashSet::from_iter(vec![a]),
+                                               HashSet::from_iter(vec![b]),
+                                               HashSet::from_iter(vec![c]),
+                                               HashSet::from_iter(vec![d])];
+
+        assert_eq!(out, expected);
+
+        // Motivating example
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let a1 = hierarchy.insert(3, false, 1, 0, 0, 0, Some(a));
+        let a2 = hierarchy.insert(3, false, 1, 0, 0, 0, Some(a));
+
+        let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let b1 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
+        let b2 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
+
+        let c = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
+        let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root]),
+                                               HashSet::from_iter(vec![a, b, c]),
+                                               HashSet::from_iter(vec![a1, a2, b1, b2]),
+                                               ];
+
+        assert_eq!(out, expected);
+
+        // Wide hierarchy
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(a));
+        let c = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
+        let d = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
+
+        let w = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let x = hierarchy.insert(3, true, 1, 0, 0, 0, Some(w));
+        let y = hierarchy.insert(3, true, 1, 0, 0, 0, Some(x));
+        let z = hierarchy.insert(3, true, 1, 0, 0, 0, Some(x));
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
+        let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root]),
+                                               HashSet::from_iter(vec![a, w]),
+                                               HashSet::from_iter(vec![b, x]),
+                                               HashSet::from_iter(vec![c, d, y, z]),
+        ];
+
+        assert_eq!(out, expected);
     }
 
     #[test]
@@ -4346,6 +4424,46 @@ mod tests {
         assert!(active_streams.contains(&stream_a2));
         assert!(active_streams.contains(&stream_b1));
         assert!(active_streams.contains(&stream_b2));
+    }
+
+    #[test]
+    pub fn hls_bfs_priority_order_2() {
+        // Stream IDs
+        let stream_c = 0;
+        let stream_d = 4;
+
+        let mut hierarchy = HLSHierarchy::new();
+
+        // Build tree in a top-down manner, reflecting EPS parsing.
+        let root = hierarchy.root;
+
+        // All nodes are incremental
+        // Class B has a higher priority than A.
+        let a = hierarchy.insert(4, true, 1, 0, 0, 0, Some(root));
+        let b = hierarchy.insert(0, true, 1, 0, 0, 0, Some(root));
+
+        // C has a higher priority than D, but D should still go first due to B's urgency.
+        let c = hierarchy.insert(0, true, 1, 0, 0, 0, Some(a));
+        let d = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
+
+        hierarchy.set_stream_id(c, stream_c);
+        hierarchy.set_stream_id(d, stream_d);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_c, stream_d]);
+
+        // Only D should be scheduled.
+        assert_eq!(active_streams.len(), 1);
+        assert!(active_streams.contains(&stream_d));
+
+        // Now, simulate D finishing the transmission and leaving the hierarchy.
+        scheduler.hierarchy.delete_class(stream_d, 1500);
+        let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_c]);
+
+        // Only C is active now.
+        assert_eq!(active_streams.len(), 1);
+        assert!(active_streams.contains(&stream_c));
     }
 
     // Sample hierarchy specification, cf. page 9 and 26 of the HLS MA thesis
