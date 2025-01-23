@@ -124,7 +124,7 @@ impl HLSHierarchy {
     }
 
     /// Removes a stream that has finished from the hierarchy.
-    pub fn delete_class(&mut self, stream_id: u64, mtu: usize) {
+    pub fn delete_stream(&mut self, stream_id: u64, mtu: usize) {
         let root = self.root;
         let capacity = self.capacity;
         let leaves = self.leaf_descendants(root);

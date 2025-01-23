@@ -4249,7 +4249,7 @@ mod tests {
     #[test]
     pub fn level_bfs_tests() {
         // Hierarchy consisting of a single root node
-        let mut hierarchy = HLSHierarchy::new();
+        let hierarchy = HLSHierarchy::new();
         let root = hierarchy.root;
         let mut scheduler = HLSScheduler::new(hierarchy);
 
@@ -4378,23 +4378,8 @@ mod tests {
         assert!(active_streams.contains(&stream_c));
 
         // Now, simulate C finishing the transmission and leaving the hierarchy.
-        let mut hierarchy = HLSHierarchy::new();
-        let root = hierarchy.root;
+        scheduler.hierarchy.delete_stream(stream_c, 1500);
 
-        let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
-        let a1 = hierarchy.insert(1, false, 1000, 0, 0, 0, Some(a));
-        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
-
-        let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
-        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
-        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
-
-        hierarchy.set_stream_id(a1, stream_a1);
-        hierarchy.set_stream_id(a2, stream_a2);
-        hierarchy.set_stream_id(b1, stream_b1);
-        hierarchy.set_stream_id(b2, stream_b2);
-
-        let mut scheduler = HLSScheduler::new(hierarchy);
         let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_a1, stream_a2, stream_b1, stream_b2]);
 
         assert_eq!(active_streams.len(), 3);
@@ -4403,20 +4388,7 @@ mod tests {
         assert!(active_streams.contains(&stream_b2));
 
         // Now, suppose A1 finishes.
-        let mut hierarchy = HLSHierarchy::new();
-        let root = hierarchy.root;
-        let a = hierarchy.insert(3, true, 200, 0, 0, 0, Some(root));
-        let a2 = hierarchy.insert(2, false, 1000, 0, 0, 0, Some(a));
-
-        let b = hierarchy.insert(3, true, 800, 0, 0, 0, Some(root));
-        let b1 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
-        let b2 = hierarchy.insert(2, true, 600, 0, 0, 0, Some(b));
-
-        hierarchy.set_stream_id(a2, stream_a2);
-        hierarchy.set_stream_id(b1, stream_b1);
-        hierarchy.set_stream_id(b2, stream_b2);
-
-        let mut scheduler = HLSScheduler::new(hierarchy);
+        scheduler.hierarchy.delete_stream(stream_a1, 1500);
 
         let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_a2, stream_b1, stream_b2]);
 
@@ -4458,7 +4430,7 @@ mod tests {
         assert!(active_streams.contains(&stream_d));
 
         // Now, simulate D finishing the transmission and leaving the hierarchy.
-        scheduler.hierarchy.delete_class(stream_d, 1500);
+        scheduler.hierarchy.delete_stream(stream_d, 1500);
         let active_streams = scheduler.backlogged_classes_from_hierarchy(vec![stream_c]);
 
         // Only C is active now.

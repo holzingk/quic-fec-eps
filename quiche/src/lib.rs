@@ -2972,7 +2972,7 @@ impl Connection {
                         // stream_recv() is used.
                         if stream.is_complete() && !stream.is_readable() {
                             // Remove the class from the hierarchy as soon as the stream completes
-                            self.hls_scheduler.hierarchy.delete_class(stream_id, mtu);
+                            self.hls_scheduler.hierarchy.delete_stream(stream_id, mtu);
 
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
@@ -2999,7 +2999,7 @@ impl Connection {
                         // stream_recv() is used.
                         if stream.is_complete() && !stream.is_readable() {
                             // Remove the class from the hierarchy as soon as the stream completes
-                            self.hls_scheduler.hierarchy.delete_class(stream_id, mtu);
+                            self.hls_scheduler.hierarchy.delete_stream(stream_id, mtu);
 
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
@@ -4922,7 +4922,7 @@ impl Connection {
                 // anymore.
                 if stream.is_complete() {
                     // Remove the class from the hierarchy as soon as the stream completes
-                    self.hls_scheduler.hierarchy.delete_class(stream_id, mtu);
+                    self.hls_scheduler.hierarchy.delete_stream(stream_id, mtu);
                     self.streams.collect(stream_id, local);
                 }
 
@@ -4947,7 +4947,7 @@ impl Connection {
 
         if complete {
             // Remove the class from the hierarchy as soon as the stream completes
-            self.hls_scheduler.hierarchy.delete_class(stream_id, mtu);
+            self.hls_scheduler.hierarchy.delete_stream(stream_id, mtu);
             self.streams.collect(stream_id, local);
         }
 
@@ -5246,7 +5246,7 @@ impl Connection {
         let mut parent = hierarchy.root;
 
         // Delete the current stream from the hierarchy.
-        hierarchy.delete_class(stream_id, mtu);
+        hierarchy.delete_stream(stream_id, mtu);
 
         // Reverse priority values (pv) to append exp_p path parameters top-down.
         for pv in priority.0.iter().rev() {
