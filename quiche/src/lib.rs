@@ -4414,7 +4414,9 @@ impl Connection {
                 }
 
                 // Use the flushable streams to determine which streams to use in this round.
-                let hls_round = scheduler.backlogged_streams_from_hierarchy(flushable);
+                // let hls_round = scheduler.backlogged_streams_from_hierarchy(flushable);
+                let hls_round = scheduler.schedule(flushable);
+
                 scheduler.init_round(hls_round);
 
                 debug!("Starting round with hierarchy: {:?}", scheduler.hierarchy);
