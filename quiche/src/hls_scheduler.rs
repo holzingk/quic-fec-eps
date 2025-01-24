@@ -631,7 +631,7 @@ impl HLSScheduler {
 
     /// Prepares the round-robin scheduler for a new main round.
     /// `backlogged_streams`: Vector of flushable stream IDs
-    pub(crate) fn init_round(&mut self, backlogged_streams: Vec<u64>) {
+    pub(crate) fn init_round(&mut self, backlogged_streams: HashSet<u64>) {
         let root_id = self.hierarchy.root;
         // Active classes are determined at the start of every round.
         let prev_active_leaves = self.l_ac.clone();
@@ -825,46 +825,60 @@ impl HLSScheduler {
         }
     }
 
-    // Based on https://en.wikipedia.org/wiki/Level_structure, 2025-01-17
-    pub(crate) fn level_bfs(&mut self, root: u64) -> Vec<HashSet<u64>> {
-        // Q ← {r}
-        let mut queue: VecDeque<u64> = VecDeque::new();
-        queue.push_back(root);
+    /// Determines which streams to schedule next
+    /// given a hierarchy and a set of active streams.
+    /// Returns stream IDs.
+    pub(crate) fn schedule(&mut self, flushable: Vec<u64>) -> HashSet<u64> {
 
-        let mut layers : Vec<HashSet<u64>> = Vec::new();
+        // This algorithm traverses the tree breadth-first beginning from the root.
+        // At each layer, the queue (frontier) explores the highest-prioritized
+        // i.e. leaves in the queue must be scheduled.
+        // internal classes are active if they have a child that is active.
+        // At first, this is the root only.
 
-        // for ℓ from 0 to ∞:
-        loop {
-            // The set Q holds all vertices at level ℓ - mark them as discovered
-            layers.push(queue.clone().into_iter().collect());
+        // More generally, we have the tuple (v1, ... vm) for a layer i
+        let mut queue: VecDeque<HLSClass> = VecDeque::new();
+        queue.push_back(self.hierarchy.class(self.hierarchy.root).clone());
 
-            // Q' ← {}
-            let mut q_prime: VecDeque<u64> = VecDeque::new();
+        let mut schedule: HashSet<u64> = HashSet::new();
 
-            // for u in Q:
-            while let Some(u) = queue.pop_front() {
-                let children: HashSet<u64> = self.hierarchy.children(u);
-                // for each edge (u, v):
+        while let Some(v) = queue.pop_front() {
+            let children: Vec<HLSClass> = self.hierarchy.children(v.id).iter()
+                .map(|c| self.hierarchy.class(*c).clone())
+                .sorted()
+                .collect();
+
+            // By definition, leaves in the queue must be scheduled if flushable.
+            if children.is_empty() {
+                let stream_id = v.stream_id.unwrap();
+                if flushable.iter().contains(&stream_id) {
+                    schedule.insert(stream_id);
+                }
+                schedule.insert(v.stream_id.unwrap());
+            } else {
+                // 1. The children (v1...vk) of v are sorted in EPS order.
+                // 2. We look at the urgency and incrementality of v1.
+                // u(v1) returns the urgency and i(v1) returns the incrementality
+                // The highest priority is at the front..
+                let v1_urgency: u8 = children.first().unwrap().urgency;
+                let v1_incremental: bool = children.first().unwrap().incremental;
+
                 for child in children {
-                    // if v is not yet marked: (no need to check assuming hierarchical structure)
-                    // add v to Q'
-                    q_prime.push_back(child);
+                    if v1_urgency == child.urgency && v1_incremental == child.incremental {
+                        queue.push_back(child);
+                    }
                 }
             }
-
-            if q_prime.is_empty() {
-                break;
-            }
-
-            queue.extend(q_prime);
         }
 
-        layers
+        schedule
     }
 
     /// Uses BFS to determine the set of active streams for the current scheduling round.
     /// Returns the stream id.
-    pub(crate) fn backlogged_classes_from_hierarchy(&mut self, flushable: Vec<u64>) -> Vec<u64> {
+    /// DEPRECATED in favor of the `schedule` method.
+    #[allow(dead_code)]
+    fn backlogged_streams_from_hierarchy(&mut self, flushable: Vec<u64>) -> Vec<u64> {
         let mut bfs_frontier: VecDeque<u64> = VecDeque::new();
         let hierarchy = &self.hierarchy;
         let root = hierarchy.root;
