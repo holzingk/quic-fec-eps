@@ -3292,8 +3292,6 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-    use std::iter::FromIterator;
     use crate::{HLSHierarchy, HLSScheduler};
     use super::*;
 
@@ -4251,29 +4249,112 @@ mod tests {
         // Hierarchy consisting of a single root node
         let mut hierarchy = HLSHierarchy::new();
         let root = hierarchy.root;
+        let root_stream = 0;
+
         hierarchy.set_stream_id(root, 0);
         let mut scheduler = HLSScheduler::new(hierarchy);
 
-        let out: HashSet<u64> = scheduler.schedule(vec![root]);
-        let expected: HashSet<u64> = HashSet::from_iter(vec![root]);
+        let out: Vec<u64> = scheduler.schedule(vec![root_stream]);
+        let expected: Vec<u64> = vec![root_stream];
 
         assert_eq!(out, expected);
     }
-    //
-    //
-    //     // Root with two children
-    //     let mut hierarchy = HLSHierarchy::new();
-    //     let root = hierarchy.root;
-    //
-    //     let a = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
-    //     let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
-    //
-    //     let mut scheduler = HLSScheduler::new(hierarchy);
-    //     let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
-    //     let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root]), HashSet::from_iter(vec![a, b])];
-    //
-    //     assert_eq!(out, expected);
-    //
+
+    #[test]
+    pub fn eps_schedule_two_inc_streams_diff_urg() {
+        // Root with two children incremental children, but at different urgency levels
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(5, true, 1, 0, 0, 0, Some(root));
+        let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+
+        let a_stream = 0;
+        let b_stream = 4;
+
+        hierarchy.set_stream_id(a, a_stream);
+        hierarchy.set_stream_id(b, b_stream);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let out: Vec<u64> = scheduler.schedule(vec![a_stream, b_stream]);
+        let expected: Vec<u64> = vec![b_stream];
+
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    pub fn eps_schedule_equal_urgency_no_inc() {
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        // Build tree in a top-down manner, reflecting EPS parsing.
+        let a = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
+        let a1 = hierarchy.insert(3, false, 1, 0, 0, 0, Some(a));
+        let b = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
+
+        let a1_stream = 0;
+        let b_stream = 4;
+
+        hierarchy.set_stream_id(a1, a1_stream);
+        hierarchy.set_stream_id(b, b_stream);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let out: Vec<u64> = scheduler.schedule(vec![a1_stream, b_stream]);
+
+        // A1 was requested before B
+        let expected: Vec<u64> = vec![a1_stream];
+
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    pub fn eps_schedule_equal_urgency_no_inc_reversed() {
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        // Build tree in a top-down manner, reflecting EPS parsing.
+        let b = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
+
+        let a = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
+        let a1 = hierarchy.insert(3, false, 1, 0, 0, 0, Some(a));
+
+        let b_stream = 0;
+        let a1_stream = 4;
+
+        hierarchy.set_stream_id(a1, a1_stream);
+        hierarchy.set_stream_id(b, b_stream);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let out: Vec<u64> = scheduler.schedule(vec![a1_stream, b_stream]);
+
+        // B was requested before A1 (distinction via class ID, not stream ID)
+        let expected: Vec<u64> = vec![b_stream];
+
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    pub fn eps_schedule_two_inc_streams_same_urg() {
+        // Root with two children incremental children, but at different urgency levels
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(5, true, 1, 0, 0, 0, Some(root));
+        let b = hierarchy.insert(5, true, 1, 0, 0, 0, Some(root));
+
+        let a_stream = 0;
+        let b_stream = 4;
+
+        hierarchy.set_stream_id(a, a_stream);
+        hierarchy.set_stream_id(b, b_stream);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let out: Vec<u64> = scheduler.schedule(vec![a_stream, b_stream]);
+        let expected: Vec<u64> = vec![a_stream, b_stream];
+
+        assert_eq!(out, expected);
+    }
+
     //     // Deep hierarchy
     //     let mut hierarchy = HLSHierarchy::new();
     //     let root = hierarchy.root;
@@ -4382,10 +4463,8 @@ mod tests {
         // Now, simulate C finishing the transmission and leaving the hierarchy.
         scheduler.hierarchy.delete_stream(stream_c, 1500);
 
-        println!("{:?}", scheduler.hierarchy);
         let active_streams = scheduler.schedule(vec![stream_a1, stream_a2, stream_b1, stream_b2]);
 
-        println!("{:?}", active_streams);
         assert_eq!(active_streams.len(), 3);
         assert!(active_streams.contains(&stream_a1));
         assert!(active_streams.contains(&stream_b1));

@@ -196,7 +196,7 @@ impl PartialEq<Self> for HLSClass {
 
 impl PartialOrd<Self> for HLSClass {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // Ignore priority if class ID matches. Default EPS would use the stream ID here.
+        // Ignore priority if class ID matches. Default EPS only uses the stream ID here.
         if self.id == other.id {
             return Some(Ordering::Equal);
         }
@@ -209,10 +209,6 @@ impl PartialOrd<Self> for HLSClass {
         // ...when the urgency is the same, and both are not incremental, order
         // by class ID. Default EPS would use the stream ID here.
         if !self.incremental && !other.incremental {
-            if self.stream_id.is_some() && other.stream_id.is_some() {
-                return self.stream_id.partial_cmp(&other.stream_id);
-            }
-
             return self.id.partial_cmp(&other.id);
         }
 
@@ -225,10 +221,8 @@ impl PartialOrd<Self> for HLSClass {
             return Some(Ordering::Less);
         }
 
-        // ...finally, when both are incremental, `other` takes precedence (so
-        // `self` is always sorted after other same-urgency incremental
-        // entries).
-        Some(Ordering::Greater)
+        // ...finally, when both are incremental, compare by class ID
+        self.id.partial_cmp(&other.id)
     }
 }
 
@@ -631,7 +625,7 @@ impl HLSScheduler {
 
     /// Prepares the round-robin scheduler for a new main round.
     /// `backlogged_streams`: Vector of flushable stream IDs
-    pub(crate) fn init_round(&mut self, backlogged_streams: HashSet<u64>) {
+    pub(crate) fn init_round(&mut self, backlogged_streams: Vec<u64>) {
         let root_id = self.hierarchy.root;
         // Active classes are determined at the start of every round.
         let prev_active_leaves = self.l_ac.clone();
@@ -830,11 +824,12 @@ impl HLSScheduler {
     /// The algorithm traverses the tree breadth-first beginning from the root.
     /// Only the layer's highest-prioritized classes are explored further.
     /// As a consequence, any leaves in the queue must be scheduled next as long as they are flushable.
-    pub(crate) fn schedule(&mut self, flushable: Vec<u64>) -> HashSet<u64> {
+    /// Note that we use a Vec instead of a Set to avoid flaky tests checking for e.g. the order of i streams
+    pub(crate) fn schedule(&mut self, flushable: Vec<u64>) -> Vec<u64> {
         let mut queue: VecDeque<HLSClass> = VecDeque::new();
         queue.push_back(self.hierarchy.class(self.hierarchy.root).clone());
 
-        let mut schedule: HashSet<u64> = HashSet::new();
+        let mut schedule: Vec<u64> = Vec::new();
 
         while let Some(v) = queue.pop_front() {
             let children: Vec<HLSClass> = self.hierarchy.children(v.id).iter()
@@ -845,7 +840,7 @@ impl HLSScheduler {
             if children.is_empty() {
                 match v.stream_id {
                     Some(stream_id) if flushable.iter().contains(&stream_id) => {
-                        schedule.insert(stream_id);
+                        schedule.push(stream_id);
                     },
                     _ => {}
                 }
@@ -854,7 +849,12 @@ impl HLSScheduler {
                 let v1_incremental: bool = children.first().unwrap().incremental;
 
                 for child in children {
-                    if v1_urgency == child.urgency && v1_incremental == child.incremental {
+                    if !v1_incremental {
+                        queue.push_back(child);
+                        break
+                    }
+
+                    if v1_urgency == child.urgency && child.incremental {
                         queue.push_back(child);
                     }
                 }
@@ -868,7 +868,7 @@ impl HLSScheduler {
     /// Returns the stream id.
     /// DEPRECATED in favor of the `schedule` method.
     #[allow(dead_code)]
-    fn backlogged_streams_from_hierarchy(&mut self, flushable: Vec<u64>) -> Vec<u64> {
+    pub(crate) fn backlogged_streams_from_hierarchy(&mut self, flushable: Vec<u64>) -> Vec<u64> {
         let mut bfs_frontier: VecDeque<u64> = VecDeque::new();
         let hierarchy = &self.hierarchy;
         let root = hierarchy.root;
@@ -891,7 +891,7 @@ impl HLSScheduler {
                     .map(|c| hierarchy.class(c))
                     .collect();
 
-                // Sort by class ID first to avoid fuzzy tests, as sets have no defined order.
+                // Sort by class ID first to avoid flaky tests, as sets have no defined order.
                 // HLS IDs should reflect the order of the requests as a tiebraker.
                 priority_siblings.sort_by_key(|sibling| sibling.id);
 
