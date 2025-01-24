@@ -4246,17 +4246,20 @@ mod tests {
             Priority::try_from(b"u=0, i, exp_p=(\"b\";u=1;exp_w=1.0 \"c\";u=2;exp_w=2.0)".as_slice()));
     }
 
-    // #[test]
-    // pub fn level_bfs_tests() {
-    //     // Hierarchy consisting of a single root node
-    //     let hierarchy = HLSHierarchy::new();
-    //     let root = hierarchy.root;
-    //     let mut scheduler = HLSScheduler::new(hierarchy);
+    #[test]
+    pub fn eps_schedule_root_only() {
+        // Hierarchy consisting of a single root node
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+        hierarchy.set_stream_id(root, 0);
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        let out: HashSet<u64> = scheduler.schedule(vec![root]);
+        let expected: HashSet<u64> = HashSet::from_iter(vec![root]);
+
+        assert_eq!(out, expected);
+    }
     //
-    //     let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
-    //     let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root])];
-    //
-    //     assert_eq!(out, expected);
     //
     //     // Root with two children
     //     let mut hierarchy = HLSHierarchy::new();

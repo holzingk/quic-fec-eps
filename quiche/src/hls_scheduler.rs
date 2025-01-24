@@ -825,18 +825,12 @@ impl HLSScheduler {
         }
     }
 
-    /// Determines which streams to schedule next
-    /// given a hierarchy and a set of active streams.
+    /// Determines which stream to schedule next given a hierarchy and a set of flushable streams.
     /// Returns stream IDs.
+    /// The algorithm traverses the tree breadth-first beginning from the root.
+    /// Only the layer's highest-prioritized classes are explored further.
+    /// As a consequence, any leaves in the queue must be scheduled next as long as they are flushable.
     pub(crate) fn schedule(&mut self, flushable: Vec<u64>) -> HashSet<u64> {
-
-        // This algorithm traverses the tree breadth-first beginning from the root.
-        // At each layer, the queue (frontier) explores the highest-prioritized
-        // i.e. leaves in the queue must be scheduled.
-        // internal classes are active if they have a child that is active.
-        // At first, this is the root only.
-
-        // More generally, we have the tuple (v1, ... vm) for a layer i
         let mut queue: VecDeque<HLSClass> = VecDeque::new();
         queue.push_back(self.hierarchy.class(self.hierarchy.root).clone());
 
@@ -848,18 +842,14 @@ impl HLSScheduler {
                 .sorted()
                 .collect();
 
-            // By definition, leaves in the queue must be scheduled if flushable.
             if children.is_empty() {
-                let stream_id = v.stream_id.unwrap();
-                if flushable.iter().contains(&stream_id) {
-                    schedule.insert(stream_id);
+                match v.stream_id {
+                    Some(stream_id) if flushable.iter().contains(&stream_id) => {
+                        schedule.insert(stream_id);
+                    },
+                    _ => {}
                 }
-                schedule.insert(v.stream_id.unwrap());
             } else {
-                // 1. The children (v1...vk) of v are sorted in EPS order.
-                // 2. We look at the urgency and incrementality of v1.
-                // u(v1) returns the urgency and i(v1) returns the incrementality
-                // The highest priority is at the front..
                 let v1_urgency: u8 = children.first().unwrap().urgency;
                 let v1_incremental: bool = children.first().unwrap().incremental;
 
