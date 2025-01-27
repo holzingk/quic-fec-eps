@@ -4349,6 +4349,76 @@ mod tests {
         assert_eq!(out, expected);
     }
 
+    #[test]
+    pub fn high_prio_not_flushable() {
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        // Low prio but flushable
+        let class_a = hierarchy.insert(7, false, 1, 0, 0, 0, Some(root));
+        let class_a1 = hierarchy.insert(7, false, 1, 0, 0, 0, Some(class_a));
+        let class_a2 = hierarchy.insert(7, false, 1, 0, 0, 0, Some(class_a1));
+        let a_stream = 0;
+
+        // High prio, but not flushable
+        let b = hierarchy.insert(0, false, 1, 0, 0, 0, Some(root));
+        let b_stream = 4;
+
+        hierarchy.set_stream_id(class_a2, a_stream);
+        hierarchy.set_stream_id(b, b_stream);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let out: Vec<u64> = scheduler.schedule(vec![a_stream]);
+        let expected: Vec<u64> = vec![a_stream];
+
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    pub fn high_prio_not_flushable_with_incremental() {
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        // High prio, not flushable
+        let a = hierarchy.insert(0, false, 1, 0, 0, 0, Some(root));
+        let a_stream = 0;
+
+        // B tied with C in urgency, but C incremental, so C should come later.
+        // But B is also not flushable.
+        let b = hierarchy.insert(1, false, 1, 0, 0, 0, Some(root));
+        let b_stream = 4;
+
+        let c = hierarchy.insert(1, true, 1, 0, 0, 0, Some(root));
+
+        // High prio, not flushable
+        let class_c1 = hierarchy.insert(0, false, 1, 0, 0, 0, Some(c));
+        let c1_stream = 8;
+
+        // Low prio, but incremental, and flushable
+        let class_c2 = hierarchy.insert(6, true, 1, 0, 0, 0, Some(c));
+        let c2_stream = 12;
+
+        let class_c3 = hierarchy.insert(6, true, 1, 0, 0, 0, Some(c));
+        let c3_stream = 16;
+
+        // Also flushable, but shouldn't be scheduled
+        let class_c4 = hierarchy.insert(7, true, 1, 0, 0, 0, Some(c));
+        let c4_stream = 20;
+
+        hierarchy.set_stream_id(a, a_stream);
+        hierarchy.set_stream_id(b, b_stream);
+        hierarchy.set_stream_id(class_c1, c1_stream);
+        hierarchy.set_stream_id(class_c2, c2_stream);
+        hierarchy.set_stream_id(class_c3, c3_stream);
+        hierarchy.set_stream_id(class_c4, c4_stream);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let out: Vec<u64> = scheduler.schedule(vec![c2_stream, c3_stream, c4_stream]);
+        let expected: Vec<u64> = vec![c2_stream, c3_stream];
+
+        assert_eq!(out, expected);
+    }
+
     //     // Deep hierarchy
     //     let mut hierarchy = HLSHierarchy::new();
     //     let root = hierarchy.root;
