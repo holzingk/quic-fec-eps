@@ -4350,7 +4350,7 @@ mod tests {
     }
 
     #[test]
-    pub fn high_prio_not_flushable() {
+    pub fn eps_schedule_high_prio_not_flushable() {
         let mut hierarchy = HLSHierarchy::new();
         let root = hierarchy.root;
 
@@ -4375,7 +4375,7 @@ mod tests {
     }
 
     #[test]
-    pub fn high_prio_not_flushable_with_incremental() {
+    pub fn eps_schedule_high_prio_not_flushable_with_incremental() {
         let mut hierarchy = HLSHierarchy::new();
         let root = hierarchy.root;
 
@@ -4419,73 +4419,63 @@ mod tests {
         assert_eq!(out, expected);
     }
 
-    //     // Deep hierarchy
-    //     let mut hierarchy = HLSHierarchy::new();
-    //     let root = hierarchy.root;
-    //
-    //     let a = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
-    //     let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(a));
-    //     let c = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
-    //     let d = hierarchy.insert(3, true, 1, 0, 0, 0, Some(c));
-    //
-    //     let mut scheduler = HLSScheduler::new(hierarchy);
-    //
-    //     let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
-    //     let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root]),
-    //                                            HashSet::from_iter(vec![a]),
-    //                                            HashSet::from_iter(vec![b]),
-    //                                            HashSet::from_iter(vec![c]),
-    //                                            HashSet::from_iter(vec![d])];
-    //
-    //     assert_eq!(out, expected);
-    //
-    //     // Motivating example
-    //     let mut hierarchy = HLSHierarchy::new();
-    //     let root = hierarchy.root;
-    //
-    //     let a = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
-    //     let a1 = hierarchy.insert(3, false, 1, 0, 0, 0, Some(a));
-    //     let a2 = hierarchy.insert(3, false, 1, 0, 0, 0, Some(a));
-    //
-    //     let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
-    //     let b1 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
-    //     let b2 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
-    //
-    //     let c = hierarchy.insert(3, false, 1, 0, 0, 0, Some(root));
-    //
-    //     let mut scheduler = HLSScheduler::new(hierarchy);
-    //     let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
-    //     let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root]),
-    //                                            HashSet::from_iter(vec![a, b, c]),
-    //                                            HashSet::from_iter(vec![a1, a2, b1, b2]),
-    //                                            ];
-    //
-    //     assert_eq!(out, expected);
-    //
-    //     // Wide hierarchy
-    //     let mut hierarchy = HLSHierarchy::new();
-    //     let root = hierarchy.root;
-    //
-    //     let a = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
-    //     let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(a));
-    //     let c = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
-    //     let d = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
-    //
-    //     let w = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
-    //     let x = hierarchy.insert(3, true, 1, 0, 0, 0, Some(w));
-    //     let y = hierarchy.insert(3, true, 1, 0, 0, 0, Some(x));
-    //     let z = hierarchy.insert(3, true, 1, 0, 0, 0, Some(x));
-    //
-    //     let mut scheduler = HLSScheduler::new(hierarchy);
-    //     let out: Vec<HashSet<u64>> = scheduler.level_bfs(root);
-    //     let expected: Vec<HashSet<u64>> = vec![HashSet::from_iter(vec![root]),
-    //                                            HashSet::from_iter(vec![a, w]),
-    //                                            HashSet::from_iter(vec![b, x]),
-    //                                            HashSet::from_iter(vec![c, d, y, z]),
-    //     ];
-    //
-    //     assert_eq!(out, expected);
-    // }
+    #[test]
+    pub fn eps_schedule_deep_hierarchy() {
+        // Deep hierarchy
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        let c = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let a = hierarchy.insert(3, false, 1, 0, 0, 0, Some(c));
+        let r = hierarchy.insert(3, true, 1, 0, 0, 0, Some(a));
+        let l = hierarchy.insert(3, false, 1, 0, 0, 0, Some(r));
+        let e = hierarchy.insert(3, true, 1, 0, 0, 0, Some(l));
+
+        let e_stream = 0;
+        hierarchy.set_stream_id(e, e_stream);
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        let out: Vec<u64> = scheduler.schedule(vec![root]);
+        let expected: Vec<u64> = vec![e_stream];
+
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    pub fn eps_schedule_wide_hierarchy() {
+        // Wide hierarchy
+        let mut hierarchy = HLSHierarchy::new();
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let a1 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(a));
+        let a1_stream: u64 = 0;
+
+        let b = hierarchy.insert(0, true, 1, 0, 0, 0, Some(root));
+        let b1 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
+        let b1_stream: u64 = 4;
+
+        let c = hierarchy.insert(0, true, 1, 0, 0, 0, Some(root));
+        let c1 = hierarchy.insert(3, false, 1, 0, 0, 0, Some(c));
+        let c1_stream: u64 = 8;
+
+        let d = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let d1 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(d));
+        let d1_stream: u64 = 16;
+
+        hierarchy.set_stream_id(a1, a1_stream);
+        hierarchy.set_stream_id(b1, b1_stream);
+        hierarchy.set_stream_id(c1, c1_stream);
+        hierarchy.set_stream_id(d1, d1_stream);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+
+        let out: Vec<u64> = scheduler.schedule(vec![a1_stream, b1_stream, c1_stream, d1_stream]);
+
+        let expected: Vec<u64> = vec![b1_stream, c1_stream];
+
+        assert_eq!(out, expected);
+    }
 
     #[test]
     pub fn eps_schedule_motivating_example() {
