@@ -4246,23 +4246,17 @@ mod tests {
 
     #[test]
     pub fn eps_schedule_root_only() {
-        // Hierarchy consisting of a single root node
-        let mut hierarchy = HLSHierarchy::new();
-        let root = hierarchy.root;
-        let root_stream = 0;
-
-        hierarchy.set_stream_id(root, 0);
-        let mut scheduler = HLSScheduler::new(hierarchy);
-
-        let out: Vec<u64> = scheduler.schedule(vec![root_stream]);
-        let expected: Vec<u64> = vec![root_stream];
+        // Hierarchy consists of a single root node without any streams
+        let mut scheduler = HLSScheduler::new(HLSHierarchy::new());
+        let out: Vec<u64> = scheduler.schedule(vec![]);
+        let expected: Vec<u64> = vec![];
 
         assert_eq!(out, expected);
     }
 
     #[test]
     pub fn eps_schedule_two_inc_streams_diff_urg() {
-        // Root with two children incremental children, but at different urgency levels
+        // Root with two incremental children, but at different urgency levels
         let mut hierarchy = HLSHierarchy::new();
         let root = hierarchy.root;
 

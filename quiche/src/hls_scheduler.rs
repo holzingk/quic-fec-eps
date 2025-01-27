@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::cmp::{Ordering};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fmt::Formatter;
@@ -819,6 +819,29 @@ impl HLSScheduler {
         }
     }
 
+    /// A class is flushable when it is itself flushable or any of its descendants is.
+    fn is_flushable(&self, class_id: u64, flushable: Vec<u64>) -> bool {
+        let class = self.hierarchy.class(class_id);
+
+        if let Some(stream_id) = class.stream_id {
+            if flushable.contains(&stream_id) {
+                return true;
+            }
+        } else {
+            let descendants = self.hierarchy.leaf_descendants(class_id);
+
+            for d in descendants {
+                // Leaf nodes MUST have a stream ID
+                let d_stream_id = self.hierarchy.class(d).stream_id.unwrap();
+                if flushable.contains(&d_stream_id) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Determines which stream to schedule next given a hierarchy and a set of flushable streams.
     /// Returns stream IDs.
     /// The algorithm traverses the tree breadth-first beginning from the root.
@@ -831,31 +854,39 @@ impl HLSScheduler {
 
         let mut schedule: Vec<u64> = Vec::new();
 
-        while let Some(v) = queue.pop_front() {
-            let children: Vec<HLSClass> = self.hierarchy.children(v.id).iter()
+        while let Some(parent) = queue.pop_front() {
+            // Filter the children to only keep the flushable streams and sort them by priority
+            let mut flushable_children: Vec<HLSClass> = self.hierarchy.children(parent.id)
+                .iter()
+                .filter(|c| self.is_flushable(**c, flushable.clone()))
                 .map(|c| self.hierarchy.class(*c).clone())
                 .sorted()
                 .collect();
 
-            if children.is_empty() {
-                match v.stream_id {
-                    Some(stream_id) if flushable.iter().contains(&stream_id) => {
-                        schedule.push(stream_id);
-                    },
-                    _ => {}
-                }
-            } else {
-                let v1_urgency: u8 = children.first().unwrap().urgency;
-                let v1_incremental: bool = children.first().unwrap().incremental;
+            if !flushable_children.is_empty() {
+                // Filter for the children with the highest priority
+                let max_urgency = flushable_children.first().unwrap().urgency;
 
-                for child in children {
-                    if !v1_incremental {
+                flushable_children.retain(|c| c.urgency == max_urgency);
+
+                for child in flushable_children {
+                    let incremental = child.incremental;
+
+                    // If the flushable child is a leaf, schedule it.
+                    if child.children.is_empty() {
+                        match child.stream_id {
+                            Some(stream_id) => {
+                                schedule.push(stream_id);
+                            },
+                            _ => {},
+                        }
+                    } else {
+                        // If it's an internal flushable class, continue exploring it.
                         queue.push_back(child);
-                        break
                     }
 
-                    if v1_urgency == child.urgency && child.incremental {
-                        queue.push_back(child);
+                    if !incremental {
+                        break
                     }
                 }
             }

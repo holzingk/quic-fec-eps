@@ -13843,44 +13843,52 @@ mod tests {
         //    and 4 and 12 are incremental.
         //  * Stream 0 is on its own. (u = 7)
 
+        // We set the priorities now as the classes would otherwise be re-prioritized
+        // (which re-inserts the stream, giving it a new class ID, changing the scheduling order)
         pipe.server.stream_recv(0, &mut b).unwrap();
         let mut priority = Priority::new(7, true);
         assert_eq!(pipe.server.stream_priority(0, &mut priority), Ok(()));
-        pipe.server.stream_send(0, &out, false).unwrap();
-        pipe.server.stream_send(0, &out, false).unwrap();
-        pipe.server.stream_send(0, &out, false).unwrap();
 
         pipe.server.stream_recv(12, &mut b).unwrap();
         let mut priority = Priority::new(6, true);
         assert_eq!(pipe.server.stream_priority(12, &mut priority), Ok(()));
-        pipe.server.stream_send(12, &out, false).unwrap();
-        pipe.server.stream_send(12, &out, false).unwrap();
-        pipe.server.stream_send(12, &out, false).unwrap();
-
-        pipe.server.stream_recv(16, &mut b).unwrap();
-        let mut priority = Priority::new(5, false);
-        assert_eq!(pipe.server.stream_priority(16, &mut priority), Ok(()));
-        pipe.server.stream_send(16, &out, false).unwrap();
-        pipe.server.stream_send(16, &out, false).unwrap();
-        pipe.server.stream_send(16, &out, false).unwrap();
-
-        pipe.server.stream_recv(4, &mut b).unwrap();
-        let mut priority = Priority::new(6, true);
-        assert_eq!(pipe.server.stream_priority(4, &mut priority), Ok(()));
-        pipe.server.stream_send(4, &out, false).unwrap();
-        pipe.server.stream_send(4, &out, false).unwrap();
-        pipe.server.stream_send(4, &out, false).unwrap();
 
         pipe.server.stream_recv(8, &mut b).unwrap();
         let mut priority = Priority::new(5, false);
         assert_eq!(pipe.server.stream_priority(8, &mut priority), Ok(()));
-        pipe.server.stream_send(8, &out, false).unwrap();
-        pipe.server.stream_send(8, &out, false).unwrap();
-        pipe.server.stream_send(8, &out, false).unwrap();
+
+        pipe.server.stream_recv(16, &mut b).unwrap();
+        let mut priority = Priority::new(5, false);
+        assert_eq!(pipe.server.stream_priority(16, &mut priority), Ok(()));
+
+        pipe.server.stream_recv(4, &mut b).unwrap();
+        let mut priority = Priority::new(6, true);
+        assert_eq!(pipe.server.stream_priority(4, &mut priority), Ok(()));
 
         pipe.server.stream_recv(20, &mut b).unwrap();
         let mut priority = Priority::new(6, false);
         assert_eq!(pipe.server.stream_priority(20, &mut priority), Ok(()));
+
+        pipe.server.stream_send(0, &out, false).unwrap();
+        pipe.server.stream_send(0, &out, false).unwrap();
+        pipe.server.stream_send(0, &out, false).unwrap();
+
+        pipe.server.stream_send(12, &out, false).unwrap();
+        pipe.server.stream_send(12, &out, false).unwrap();
+        pipe.server.stream_send(12, &out, false).unwrap();
+
+        pipe.server.stream_send(16, &out, false).unwrap();
+        pipe.server.stream_send(16, &out, false).unwrap();
+        pipe.server.stream_send(16, &out, false).unwrap();
+
+        pipe.server.stream_send(4, &out, false).unwrap();
+        pipe.server.stream_send(4, &out, false).unwrap();
+        pipe.server.stream_send(4, &out, false).unwrap();
+
+        pipe.server.stream_send(8, &out, false).unwrap();
+        pipe.server.stream_send(8, &out, false).unwrap();
+        pipe.server.stream_send(8, &out, false).unwrap();
+
         pipe.server.stream_send(20, &out, false).unwrap();
         pipe.server.stream_send(20, &out, false).unwrap();
         pipe.server.stream_send(20, &out, false).unwrap();
