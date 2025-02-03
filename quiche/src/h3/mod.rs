@@ -4535,6 +4535,71 @@ mod tests {
         assert!(active_streams.contains(&stream_b2));
     }
 
+    // All streams are incremental and have the same urgency,
+    // falling back to the behavior of "pure" HLS.
+    #[test]
+    pub fn eps_schedule_pure_hls() {
+        // Stream IDs
+        let stream_a = 0;
+        let stream_b1 = 4;
+        let stream_b2 = 8;
+        let stream_c1 = 12;
+        let stream_c2 = 16;
+
+        let mut hierarchy = HLSHierarchy::new();
+
+        // Build tree in a top-down manner, reflecting EPS parsing.
+        let root = hierarchy.root;
+
+        let a = hierarchy.insert(3, true, 3, 0, 0, 0, Some(root));
+
+        let b = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let b1 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(b));
+        let b2 = hierarchy.insert(3, true, 2, 0, 0, 0, Some(b));
+
+        let c = hierarchy.insert(3, true, 1, 0, 0, 0, Some(root));
+        let c1 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(c));
+        let c2 = hierarchy.insert(3, true, 1, 0, 0, 0, Some(c));
+
+        hierarchy.set_stream_id(a, stream_a);
+        hierarchy.set_stream_id(b1, stream_b1);
+        hierarchy.set_stream_id(b2, stream_b2);
+        hierarchy.set_stream_id(c1, stream_c1);
+        hierarchy.set_stream_id(c2, stream_c2);
+
+        let mut scheduler = HLSScheduler::new(hierarchy);
+        let active_streams = scheduler.schedule(vec![stream_a, stream_b1, stream_b2, stream_c1, stream_c2]);
+
+        // All streams should be scheduled.
+        assert_eq!(active_streams.len(), 5);
+        assert!(active_streams.contains(&stream_a));
+        assert!(active_streams.contains(&stream_b1));
+        assert!(active_streams.contains(&stream_b2));
+        assert!(active_streams.contains(&stream_c1));
+        assert!(active_streams.contains(&stream_c2));
+
+        // Now, simulate A, C1, and C2 finishing the transmission
+        // and leaving the hierarchy at the same time.
+        // (Should be the case if C1's filesize matches C2, respectively being 1/10th of A)
+        scheduler.hierarchy.delete_stream(stream_a, 1500);
+        scheduler.hierarchy.delete_stream(stream_c1, 1500);
+        scheduler.hierarchy.delete_stream(stream_c2, 1500);
+
+        let active_streams = scheduler.schedule(vec![stream_b1, stream_b2]);
+
+        assert_eq!(active_streams.len(), 2);
+        assert!(active_streams.contains(&stream_b1));
+        assert!(active_streams.contains(&stream_b2));
+
+        // Now, B2 finishes.
+        scheduler.hierarchy.delete_stream(stream_b2, 1500);
+
+        let active_streams = scheduler.schedule(vec![stream_b1]);
+
+        assert_eq!(active_streams.len(), 1);
+        assert!(active_streams.contains(&stream_b1));
+    }
+
     #[test]
     pub fn eps_schedule_all_incremental() {
         // Stream IDs
