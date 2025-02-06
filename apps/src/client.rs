@@ -366,15 +366,16 @@ pub fn connect(
 
             let app_proto = conn.application_proto();
 
-            if alpns::HTTP_09.contains(&app_proto) {
-                http_conn = Some(Http09Conn::with_urls(
-                    &args.urls,
-                    args.reqs_cardinal,
-                    Rc::clone(&output_sink),
-                ));
+            // if alpns::HTTP_09.contains(&app_proto) {
+            //     http_conn = Some(Http09Conn::with_urls(
+            //         &args.urls,
+            //         args.reqs_cardinal,
+            //         Rc::clone(&output_sink),
+            //     ));
 
-                app_proto_selected = true;
-            } else if alpns::HTTP_3.contains(&app_proto) {
+                // // app_proto_selected = true;
+        // } else
+	    if alpns::HTTP_3.contains(&app_proto) {
                 let dgram_sender = if conn_args.dgrams_enabled {
                     Some(Http3DgramSender::new(
                         conn_args.dgram_count,

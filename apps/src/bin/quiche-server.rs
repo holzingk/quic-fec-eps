@@ -441,11 +441,12 @@ fn main() {
                 let app_proto = client.conn.application_proto();
 
                 #[allow(clippy::box_default)]
-                if alpns::HTTP_09.contains(&app_proto) {
-                    client.http_conn = Some(Box::<Http09Conn>::default());
+                // if alpns::HTTP_09.contains(&app_proto) {
+                //     client.http_conn = Some(Box::<Http09Conn>::default());
 
-                    client.app_proto_selected = true;
-                } else if alpns::HTTP_3.contains(&app_proto) {
+                //     client.app_proto_selected = true;
+                // } else
+		if alpns::HTTP_3.contains(&app_proto) {
                     let dgram_sender = if conn_args.dgrams_enabled {
                         Some(Http3DgramSender::new(
                             conn_args.dgram_count,
