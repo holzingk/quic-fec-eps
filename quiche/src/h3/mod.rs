@@ -815,21 +815,21 @@ fn eps_parse_repair_delay_tolerance(bitem: Option<&sfv::BareItem>) -> std::resul
 /// trait requires the `sfv` feature to be enabled.
 #[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
-pub struct Priority(Vec<PriorityValues>);
+pub struct Priority(pub Vec<PriorityValues>);
 
 /// The priority attributes of a node in the tree of priority classes
 #[derive(Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct PriorityValues {
-    urgency: u8,
-    incremental: bool,
-    weight: u32,
-    id: Option<String>,
+    pub urgency: u8,
+    pub incremental: bool,
+    pub weight: u32,
+    pub id: Option<String>,
     // in promille, cannot implement Eq for float types
-    protection_ratio: u32,
-    burst_loss_tolerance: u32,
+    pub protection_ratio: u32,
+    pub burst_loss_tolerance: u32,
     // in promille, cannot implement Eq for float types
-    repair_delay_tolerance: u32,
+    pub repair_delay_tolerance: u32,
 }
 
 
