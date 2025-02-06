@@ -4,6 +4,8 @@ use super::{FecConfig, Gf};
 use std::collections::{VecDeque, BTreeMap};
 use super::symbol::Symbol;
 
+use std::time::Instant;
+
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
@@ -79,6 +81,7 @@ pub struct Encoder {
     left_for_tail_protection: u64,
     incremental: bool,
     lost_ss: VecDeque<u64>,
+    last_repair_burst: Option<Instant>,	
 }
 
 impl Encoder {
@@ -247,6 +250,7 @@ impl Encoder {
 	    left_for_tail_protection: 0,
 	    incremental: false,
 	    lost_ss: VecDeque::new(),
+	    last_repair_burst: None,
         })
     }
 
@@ -271,6 +275,9 @@ impl Encoder {
         )?);
         let res = self.next_id;
         self.next_id += 1;
+	if self.app_limited && self.incremental {
+	    self.last_repair_burst = Some(Instant::now());
+	}
 	self.app_limited = false;
 	self.left_for_tail_protection = 0;
 	self.sent_source_symbols += 1;
@@ -344,11 +351,14 @@ impl Encoder {
     /// To be called if repair symbol actually is sent
     pub fn put_repair_symbol_in_flight(&mut self, largest_symbol_id: u64) {
 	self.sent_repair_symbols += 1;
-	if self.lost >  0 {
+	if self.lost > 0 {
 	    self.lost = self.lost.saturating_sub(1);
 	    trace!("Encoder recovering loss with a repair symbol");
 	} else if self.left_for_tail_protection > 0 {
-	    self.left_for_tail_protection -= 1;
+	    self.left_for_tail_protection = self.left_for_tail_protection.saturating_sub(1);
+	    if self.left_for_tail_protection == 0 && self.incremental {
+		self.last_repair_burst = Some(Instant::now());
+	    }
 	}
 
 	self.in_flight_rs.entry(largest_symbol_id)
