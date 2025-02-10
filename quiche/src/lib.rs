@@ -4402,7 +4402,7 @@ impl Connection {
 		trace!("Stream {writable_stream_id} is flushed");
 		match self.fec.get_mut(&writable_stream_id) {
 		    Some(tetrys) => {
-			if tetrys.encoder.notify_flushed() {
+			if tetrys.encoder.on_flushed() {
 			    qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
 				q.add_event_data_with_instant(tetrys.encoder.qlog_event(writable_stream_id), now).ok();
 			    });
@@ -4419,46 +4419,8 @@ impl Connection {
 	    !is_closing && path.active()
 	{
 	    for (fec_session, tetrys) in self.fec.iter_mut() {
-		match tetrys.encoder.should_send_next() {
-		    SymbolKind::Repair => {
-			let rs = tetrys.encoder
-			    .generate_repair_symbol()
-			    .expect("If we should send, it must be able to generate");
-
-			let len = tetrys.encoder.get_repair_symbol_len();
-			let highest_sid = rs.get_largest_symbol_id();
-			let repair_frame = frame::Frame::Repair {
-			    fec_session: *fec_session,
-			    smallest_sid: rs.get_smallest_symbol_id(),
-			    highest_sid,
-			    seed: rs.get_seed() as u64,
-			    len: len as u64,
-			    data: rs.get_payload_aligned_as_ref()[..len].to_vec(),
-			};
-			if repair_frame.wire_len() < left && frames.len() < 2 {
-			    trace!("{} Pushing repair frame to packet: smallest_sid {}, highest_sid {}, seed {}, len {}",
-				   self.trace_id,
-				   rs.get_smallest_symbol_id(),
-				   rs.get_largest_symbol_id(),
-				   rs.get_seed() as u64,
-				   len);
-			    if push_frame_to_pkt!(b, frames, repair_frame, left) {
-				ack_eliciting = true;
-				in_flight = true;
-				tetrys.encoder.put_repair_symbol_in_flight(highest_sid);
-				qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
-				    q.add_event_data_with_instant(tetrys.encoder.qlog_event(*fec_session), now).ok();
-				});
-			    }
-			} else {
-			    trace!("{} Not enough space {left} left for this repair symbol {}", self.trace_id, repair_frame.wire_len());
-			}
-		    },
-		    SymbolKind::RetransmittedSource => 'retranssource: {
-			let Some((sid, ss_payload)) = tetrys.encoder.get_source_symbol_to_retransmit() else {
-			    trace!("no source symbol found, so it should already be available at receiver, e.g. via symbol ack");
-			    break 'retranssource;
-			};
+		if tetrys.encoder.should_send_retransmitted_ss() {
+		    if let Some((sid, ss_payload)) = tetrys.encoder.get_source_symbol_to_retransmit() {
 			let ss_frame = frame::Frame::SourceSymbol {
 			    fec_session: *fec_session,
 			    sid: sid,
@@ -4479,8 +4441,42 @@ impl Connection {
 			} else {
 			    trace!("{} Not enough space {left} left for this source symbol {}", self.trace_id, ss_frame.wire_len());
 			}
-		    },
-		    _ => {}
+		    } else {
+			trace!("no source symbol found, so it should already be available at receiver, e.g. via symbol ack");
+		    }
+		} else if tetrys.encoder.should_send_rs() {
+		    let rs = tetrys.encoder
+			.generate_repair_symbol()
+			.expect("If we should send, it must be able to generate");
+
+		    let len = tetrys.encoder.get_repair_symbol_len();
+		    let highest_sid = rs.get_largest_symbol_id();
+		    let repair_frame = frame::Frame::Repair {
+			fec_session: *fec_session,
+			smallest_sid: rs.get_smallest_symbol_id(),
+			highest_sid,
+			seed: rs.get_seed() as u64,
+			len: len as u64,
+			data: rs.get_payload_aligned_as_ref()[..len].to_vec(),
+		    };
+		    if repair_frame.wire_len() < left && frames.len() < 2 {
+			trace!("{} Pushing repair frame to packet: smallest_sid {}, highest_sid {}, seed {}, len {}",
+			       self.trace_id,
+			       rs.get_smallest_symbol_id(),
+			       rs.get_largest_symbol_id(),
+			       rs.get_seed() as u64,
+			       len);
+			if push_frame_to_pkt!(b, frames, repair_frame, left) {
+			    ack_eliciting = true;
+			    in_flight = true;
+			    tetrys.encoder.put_repair_symbol_in_flight(highest_sid);
+			    qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+				q.add_event_data_with_instant(tetrys.encoder.qlog_event(*fec_session), now).ok();
+			    });
+			}
+		    } else {
+			trace!("{} Not enough space {left} left for this repair symbol {}", self.trace_id, repair_frame.wire_len());
+		    }
 		}
 	    }
 	}
@@ -4706,7 +4702,11 @@ impl Connection {
 			.unwrap();
 		    if fin {
 			// this stream is flushed when a fin is sent
-			let _ = tetrys.encoder.notify_flushed();
+			if tetrys.encoder.on_flushed() {
+			    qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
+				q.add_event_data_with_instant(tetrys.encoder.qlog_event(stream_id), now).ok();
+			    });
+			}
 		    }
 		    qlog_with_type!(QLOG_FEC_ENCODER, self.qlog, q, {
 			q.add_event_data_with_instant(tetrys.encoder.qlog_event(stream_id), now).ok();
@@ -6184,7 +6184,9 @@ impl Connection {
                 .key_update
                 .as_ref()
                 .map(|key_update| key_update.timer);
-            let timers = [self.idle_timer, path_timer, key_update_timer];
+	    let fec_timer =
+		self.fec.iter().filter_map(|(_, tetrys)| tetrys.encoder.timeout_instant()).min();
+            let timers = [self.idle_timer, path_timer, key_update_timer, fec_timer];
 
             timers.iter().filter_map(|&x| x).min()
         }
@@ -6319,6 +6321,15 @@ impl Connection {
                 None => self.closed = true,
             }
         }
+
+	for (sid, tetrys) in self.fec.iter_mut() {
+	    if let Some(timer) = tetrys.encoder.timeout_instant() {
+		if timer <= now {
+		    trace!("{} Fec encoder timeout expired in fec session {sid}", self.trace_id);
+		    tetrys.encoder.on_timeout();
+		}
+	    }
+	}
     }
 
     /// Requests the stack to perform path validation of the proposed 4-tuple.
@@ -7346,8 +7357,8 @@ impl Connection {
         // If there are flushable, almost full or blocked streams, use the
         // Application epoch.
         let send_path = self.paths.get(send_pid)?;
-	let repair_symbol_outstanding = self.fec.iter().any(|(_, tetrys)| tetrys.encoder.should_send_next() == SymbolKind::Repair) ||
-	    self.fec.iter().any(|(_, tetrys)| tetrys.encoder.should_send_next() == SymbolKind::RetransmittedSource);
+	let repair_symbol_outstanding = self.fec.iter().any(|(_, tetrys)| tetrys.encoder.should_send_rs()) ||
+	    self.fec.iter().any(|(_, tetrys)| tetrys.encoder.should_send_retransmitted_ss());
         if (self.is_established() || self.is_in_early_data()) &&
             (self.should_send_handshake_done() ||
                 self.almost_full ||

@@ -4,7 +4,7 @@ use super::{FecConfig, Gf};
 use std::collections::{VecDeque, BTreeMap};
 use super::symbol::Symbol;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
@@ -77,27 +77,28 @@ pub struct Encoder {
     retransmitted_source_symbols: u64,
     sent_source_symbols: u64,
     //    rsrc: StaticRepairSymbolRateController,
-    app_limited: bool,
-    left_for_tail_protection: u64,
+    //app_limited: bool,
+    //left_for_tail_protection: u64,
     incremental: bool,
     lost_ss: VecDeque<u64>,
-    last_repair_burst: Option<Instant>,	
+    //last_repair_burst: Option<Instant>,
+
+    t_last_flush_notification: Option<Instant>,
+    repair_delay_tolerance: Duration,
+    t_first_unprotected_ss: Option<Instant>,
+    left_for_protection: u64,
 }
 
 impl Encoder {
 
     /// Return qlog event
     pub fn qlog_event(&self, fec_id: u64) -> EventData {
-	let in_flight_rs = self.in_flight_rs.iter()
-	    .fold(0, |acc, (_sid, &count)| acc + count);
-	let in_flight_ss = self.sliding_window.len() as u64;
-	let in_flight = in_flight_rs + in_flight_ss;
 	qlog::events::EventData::EncoderMetricsUpdated(qlog::events::quic::EncoderMetricsUpdated {
 	    fec_id,
-	    app_limited: self.app_limited,
-	    in_flight_rs,
-	    in_flight_ss,
-	    in_flight,
+	    app_limited: self.t_last_flush_notification.is_some(),
+	    in_flight_rs: self.in_flight_rs(),
+	    in_flight_ss: self.in_flight_ss(),
+	    in_flight: self.in_flight(),
 	    tx_ss: self.sent_source_symbols,
 	    tx_rs: self.sent_repair_symbols,
 	    tx_re_ss: self.retransmitted_source_symbols,
@@ -125,101 +126,232 @@ impl Encoder {
 	self.lost += 1;
     }
 
+    pub fn in_flight_rs(&self) -> u64 {
+	self.in_flight_rs.iter()
+	    .fold(0, |acc, (_sid, &count)| acc + count)
+    }
+
+    pub fn in_flight_ss(&self) -> u64 {
+	self.sliding_window.len() as u64
+    }
+
+    pub fn in_flight(&self) -> u64 {
+	self.in_flight_rs() + self.in_flight_ss()
+    }
+
     /// Returns statistics about the state of the encoder
     pub fn get_stats(&self) -> EncodingStats {
-	let in_flight_rs = self.in_flight_rs.iter()
-	    .fold(0, |acc, (_sid, &count)| acc + count);
-	let in_flight_ss = self.sliding_window.len() as u64;
-	let in_flight = in_flight_rs + in_flight_ss;
 	EncodingStats {
-	    in_flight_rs,
-	    in_flight_ss,
-	    in_flight,
-	    protection_ratio: in_flight_rs as f64 / in_flight as f64,
+	    in_flight_rs: self.in_flight_rs(),
+	    in_flight_ss: self.in_flight_ss(),
+	    in_flight: self.in_flight(),
+	    protection_ratio: self.in_flight_rs() as f64 / self.in_flight() as f64,
 	    sent_repair_symbols: self.sent_repair_symbols,
 	    sent_source_symbols: self.sent_source_symbols,
 	    retransmitted_source_symbols: self.retransmitted_source_symbols
 	}
     }
 
-    /// Informs that the stream as no data left to send, might be the begin of a new app limited phase
+    /// Informs that the stream as no data left to send, or after FIN was set on a stream might be the begin of a new app limited phase
     /// Returns true if information was new
-    pub fn notify_flushed(&mut self) -> bool {
-	if self.app_limited == false {
-	    self.app_limited = true;
+    // pub fn notify_flushed(&mut self) -> bool {
+    // 	if self.app_limited == false {
+    // 	    self.app_limited = true;
 
-	    let stats = self.get_stats();
+    // 	    let stats = self.get_stats();
 
-	    self.left_for_tail_protection = match self.reliability_level {
-		ReliabilityLevel::RecoveryOnly => { 0 },
-		ReliabilityLevel::BurstLossTolerance(b) => {
-		    b
-		},
-		ReliabilityLevel::FixedRedundancyRatio(p) => {
-		    (p * stats.in_flight as f64) as u64
+    // 	    self.left_for_tail_protection = match self.reliability_level {
+    // 		ReliabilityLevel::RecoveryOnly => { 0 },
+    // 		ReliabilityLevel::BurstLossTolerance(b) => {
+    // 		    b
+    // 		},
+    // 		ReliabilityLevel::FixedRedundancyRatio(p) => {
+    // 		    (p * stats.in_flight as f64) as u64
+    // 		}
+    // 	    };
+    // 	    return true;
+    // 	}
+    // 	false
+    // }
+
+    pub fn timeout_instant(&self) -> Option<Instant> {
+	if self.reliability_level == ReliabilityLevel::RecoveryOnly {
+	    return None;
+	}
+	match self.incremental {
+	    // Time until burst loss tolerance expires after last flush
+	    false => {
+		if self.t_last_flush_notification.is_some() {
+		    Some(self
+			 .t_last_flush_notification
+			 .unwrap()
+			 .checked_add(self.repair_delay_tolerance).unwrap())
+		} else {
+		    None
 		}
-	    };
-	    return true;
+	    },
+	    // Time until burst loss tolerance expires after first unprotected SS
+	    true => {
+		if self.t_first_unprotected_ss.is_some() {
+		    Some(self
+			 .t_first_unprotected_ss.unwrap()
+			 .checked_add(self.repair_delay_tolerance).unwrap())
+		} else {
+		    None
+		}
+	    }
+	}
+    }
+
+    pub fn timeout(&self) -> Option<Duration> {
+	self.timeout_instant().map(|timeout| {
+	    let now = Instant::now();
+            if timeout <= now {
+                Duration::ZERO
+            } else {
+                timeout.duration_since(now)
+            }
+        })
+    }
+
+    pub fn on_timeout(&mut self) {
+	// if timeout was not reached return
+	if self.timeout() != Some(Duration::ZERO) {
+	    return
+	}
+	trace!("FEC timeout occured");
+	match self.incremental {
+	    // Timer = None
+	    false => {
+		self.t_last_flush_notification = None;
+	    },
+	    // Timer resetten
+	    true => {
+		self.t_first_unprotected_ss = None;
+	    }
+	}
+	// Anzahl RS zu senden setzen
+	self.left_for_protection = match self.reliability_level {
+	    ReliabilityLevel::RecoveryOnly => { 0 },
+	    ReliabilityLevel::BurstLossTolerance(b) => {
+		b
+		//b as f64 / stats.in_flight as f64
+	    },
+	    ReliabilityLevel::FixedRedundancyRatio(p) => {
+		0
+	    }
+	};
+    }
+
+    pub fn on_flushed(&mut self) -> bool {
+	if !self.incremental {
+	    // falls timer noch nicht läuft, Timer starten
+	    if self.t_last_flush_notification.is_none() {
+		trace!("Newly flushed");
+		self.t_last_flush_notification = Some(Instant::now());
+		return true;
+	    }
 	}
 	false
     }
 
-    /// Returns the kind of symbol that should be sent in the next packet
-    pub fn should_send_next(&self) -> SymbolKind {
-	// recovery has highest priority
-	if self.lost > 0 {
-	    if self.lost_ss.len() > 0 && self.buffered_symbols() > 0 && !self.incremental {
-		trace!("Next source symbol should be sent due to retransmission based recovery");
-		return SymbolKind::RetransmittedSource;
+    pub fn on_source_symbol(&mut self) {
+	match self.incremental {
+	    false => {
+		// falls timer läuft, wieder ausschalten
+		self.t_last_flush_notification = None;
+		// protection count is zero
+		self.left_for_protection = 0;
+	    },
+	    true => {
+		// falls timer noch nicht läuft, einschalten (erstes SS in batch)
+		if self.t_first_unprotected_ss.is_none() {
+		    self.t_first_unprotected_ss = Some(Instant::now());
+		}
 	    }
-	    if self.buffered_symbols() > 0 {
-		trace!("Next repair symbol should be sent due to recovery");
-		return SymbolKind::Repair;
-	    } else {
-		trace!("Cannot send as symbol buffer is empty");
-	    }
-	}
-	
-	let stats = self.get_stats();
-
-	// we cannot generate repair symbols out of thin air
-	if stats.in_flight == 0 {
-	    trace!("Next source symbol should be sent, as nothing is in flight");
-	    return SymbolKind::Source;
-	}
-
-	if self.left_for_tail_protection > 0 {
-	    trace!("Next repair symbol should be sent, We are in tail protection");
-	    return SymbolKind::Repair;
-	}
-
-	// we only send repair symbols for recovery and tail protection in the non-incremental case
-	if !self.incremental {
-	    trace!("Next source symbol should be sent, as we are non incremental");
-	    return SymbolKind::Source;
-	}
-
-	let should_p = match self.reliability_level {
-	    ReliabilityLevel::RecoveryOnly => {
-		trace!("Next source symbol should be sent as in recovery only and no lost packets");
-		return SymbolKind::Source;
-	    },
-	    ReliabilityLevel::BurstLossTolerance(b) => {
-		b as f64 / stats.in_flight as f64
-	    },
-	    ReliabilityLevel::FixedRedundancyRatio(p) => {
-		p
-	    },
-	};
-	
-	if stats.protection_ratio < should_p {
-	    trace!("Less than desired burst loss tolerance, so send repair symbol next");
-	    return SymbolKind::Repair
-	} else {
-	    trace!("Enough protected packets, send source symbol next");
-	    return SymbolKind::Source
 	}
     }
+
+    pub fn on_repair_symbol(&mut self) {
+	self.left_for_protection = self.left_for_protection.saturating_sub(1);
+    }
+
+    pub fn should_send_retransmitted_ss(&self) -> bool {
+	if self.lost_ss.len() > 0 && self.buffered_symbols() > 0 {
+	    trace!("Should send retransmitted SS");
+	    return true
+	}
+	false
+    }
+
+    pub fn should_send_rs(&self) -> bool {
+	if self.reliability_level == ReliabilityLevel::RecoveryOnly {
+	    false
+	} else {
+	    if self.in_flight() > 0 && self.left_for_protection > 0 && self.buffered_symbols() > 0 {
+		trace!("Should send RS");
+		return true;
+	    }
+	    false
+	}
+    }
+
+    // /// Returns the kind of symbol that should be sent in the next packet
+    // pub fn should_send_next(&self) -> SymbolKind {
+    // 	// recovery has highest priority
+    // 	if self.lost > 0 {
+    // 	    if self.lost_ss.len() > 0 && self.buffered_symbols() > 0 && !self.incremental {
+    // 		trace!("Next source symbol should be sent due to retransmission based recovery");
+    // 		return SymbolKind::RetransmittedSource;
+    // 	    }
+    // 	    if self.buffered_symbols() > 0 {
+    // 		trace!("Next repair symbol should be sent due to recovery");
+    // 		return SymbolKind::Repair;
+    // 	    } else {
+    // 		trace!("Cannot send as symbol buffer is empty");
+    // 	    }
+    // 	}
+	
+    // 	let stats = self.get_stats();
+
+    // 	// we cannot generate repair symbols out of thin air
+    // 	if stats.in_flight == 0 {
+    // 	    trace!("Next source symbol should be sent, as nothing is in flight");
+    // 	    return SymbolKind::Source;
+    // 	}
+
+    // 	if self.left_for_tail_protection > 0 {
+    // 	    trace!("Next repair symbol should be sent, We are in tail protection");
+    // 	    return SymbolKind::Repair;
+    // 	}
+
+    // 	// we only send repair symbols for recovery and tail protection in the non-incremental case
+    // 	if !self.incremental {
+    // 	    trace!("Next source symbol should be sent, as we are non incremental");
+    // 	    return SymbolKind::Source;
+    // 	}
+
+    // 	let should_p = match self.reliability_level {
+    // 	    ReliabilityLevel::RecoveryOnly => {
+    // 		trace!("Next source symbol should be sent as in recovery only and no lost packets");
+    // 		return SymbolKind::Source;
+    // 	    },
+    // 	    ReliabilityLevel::BurstLossTolerance(b) => {
+    // 		b as f64 / stats.in_flight as f64
+    // 	    },
+    // 	    ReliabilityLevel::FixedRedundancyRatio(p) => {
+    // 		p
+    // 	    },
+    // 	};
+	
+    // 	if stats.protection_ratio < should_p {
+    // 	    trace!("Less than desired burst loss tolerance, so send repair symbol next");
+    // 	    return SymbolKind::Repair
+    // 	} else {
+    // 	    trace!("Enough protected packets, send source symbol next");
+    // 	    return SymbolKind::Source
+    // 	}
+    // }
     
     /// Sets the reliability level that is to be respected by the redundancy scheduler
     pub fn set_reliability_level(&mut self, lvl: ReliabilityLevel) {
@@ -246,12 +378,20 @@ impl Encoder {
 	    sent_repair_symbols: 0,
 	    retransmitted_source_symbols: 0,
 	    sent_source_symbols: 0,
-	    app_limited: true,
-	    left_for_tail_protection: 0,
+	    //app_limited: true,
+	    //left_for_tail_protection: 0,
 	    incremental: false,
 	    lost_ss: VecDeque::new(),
-	    last_repair_burst: None,
+	    //last_repair_burst: None,
+	    t_last_flush_notification: None,
+	    repair_delay_tolerance: Duration::ZERO,
+	    t_first_unprotected_ss: None,
+	    left_for_protection: 0,
         })
+    }
+
+    pub fn set_repair_delay_tolerance(&mut self, delay: Duration) {
+	self.repair_delay_tolerance = delay;
     }
 
     /// Get the next source symbol ID
@@ -275,11 +415,13 @@ impl Encoder {
         )?);
         let res = self.next_id;
         self.next_id += 1;
-	if self.app_limited && self.incremental {
-	    self.last_repair_burst = Some(Instant::now());
-	}
-	self.app_limited = false;
-	self.left_for_tail_protection = 0;
+	
+	self.on_source_symbol();
+	// if self.app_limited && self.incremental {
+	//     self.last_repair_burst = Some(Instant::now());
+	// }
+	// self.app_limited = false;
+	// self.left_for_tail_protection = 0;
 	self.sent_source_symbols += 1;
         //self.rsrc.add_source_symbol();
         Ok(res)
@@ -354,12 +496,14 @@ impl Encoder {
 	if self.lost > 0 {
 	    self.lost = self.lost.saturating_sub(1);
 	    trace!("Encoder recovering loss with a repair symbol");
-	} else if self.left_for_tail_protection > 0 {
-	    self.left_for_tail_protection = self.left_for_tail_protection.saturating_sub(1);
-	    if self.left_for_tail_protection == 0 && self.incremental {
-		self.last_repair_burst = Some(Instant::now());
-	    }
 	}
+	self.on_repair_symbol();
+	// else if self.left_for_tail_protection > 0 {
+	//     self.left_for_tail_protection = self.left_for_tail_protection.saturating_sub(1);
+	//     if self.left_for_tail_protection == 0 && self.incremental {
+	// 	self.last_repair_burst = Some(Instant::now());
+	//     }
+	// }
 
 	self.in_flight_rs.entry(largest_symbol_id)
 	    .and_modify(|c| *c += 1)
