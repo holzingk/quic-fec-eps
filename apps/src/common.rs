@@ -74,6 +74,7 @@ pub struct IncrementalDataGenerator {
     start: Instant,
     chunks_generated: u32,
     len: usize,
+    total_len: usize,
 }
 
 
@@ -84,12 +85,13 @@ pub struct IncrementalDataGenerator {
 ///
 /// [`on_timeout()`]: struct.Connection.html#method.on_timeout
 impl IncrementalDataGenerator {
-    pub fn new(interval: Duration, len: usize) -> Self {
+    pub fn new(interval: Duration, len: usize, total_len: usize) -> Self {
 	Self {
 	    interval,
 	    start: Instant::now(),
 	    chunks_generated: 0,
 	    len,
+	    total_len,
 	}
     }
 
@@ -109,10 +111,15 @@ impl IncrementalDataGenerator {
     pub fn on_timeout(&mut self) -> Option<Vec<u8>> {
 	if self.timeout() == Duration::ZERO {
 	    self.chunks_generated += 1;
+	    
 	    Some(make_body_with_timestamp(self.len))
 	} else {
 	    None
 	}
+    }
+
+    pub fn fin(&self) -> bool {
+	self.chunks_generated as usize * self.len > self.total_len
     }
 }
 
@@ -1886,35 +1893,69 @@ impl HttpConn for Http3Conn {
         }
 
         resp.headers_sent = true;
+	
+	let url = &resp.url.as_ref().expect("url must be set");
+	if let (Some(i_duration), Some(i_len), Some(len), None) =
+	    (interval_duration_from_url(url),
+	     interval_len_from_url(url),
+	     length_from_query_string(url),
+	     &resp.incremental_data_generator) {
+		resp.incremental_data_generator = Some(IncrementalDataGenerator::new(i_duration, i_len, len));
+	    };
 
-	// check if new data needs to be generated and append to resp.body
-	if resp.priority.0[0].incremental {
-	    // If nothing was written yet, initialize "streaming"
-	    if resp.written == 0 && resp.body.len() == 0 {
-		resp.incremental_data_generator = Some(
-		    IncrementalDataGenerator::new(
-			interval_duration_from_url(
-			    &resp.url.as_ref().expect("url must be set"))
-			    .expect("interval_us must be provided"),
-			interval_len_from_url(
-			    &resp.url.as_ref().expect("url must be set"))
-			    .expect("inteval_us must be provided")));
+	let (mut to_append, fin) = {
+	    if let Some(dg) = &mut resp.incremental_data_generator {
+		// new data needs to be generated
+		if !dg.fin() {
+		    (dg.on_timeout(), false)
+
+		} else {
+		    // fin should be sent, no new data
+		    (None, true)
+		}
+	    } else if resp.written == 0 && resp.body.len() == 0 {
+		// it's the non incremental case, initial data needs to be generated
+		(Some(make_body_with_timestamp(resp.desired_length.unwrap())), true)
+		//resp.body.append(&mut make_body_with_timestamp(resp.desired_length.unwrap()))
+	    } else {
+		// non incremental, data is already there
+		(None, true)
 	    }
-	    // Just maybe add data
-	    resp.incremental_data_generator
-		.as_mut()
-		.expect("Must be created")
-		.on_timeout()
-		.as_mut()
-		.map(|v| resp.body.append(v));
-	} else if resp.written == 0 && resp.body.len() == 0 {
-	    // not incremental and body is zero
-	    resp.body.append(&mut make_body_with_timestamp(resp.desired_length.unwrap()))
-	}
+	};
+	to_append.as_mut().map(|v| resp.body.append(v));
+	
+	// // check if new data needs to be generated and append to resp.body
+	// if resp.priority.0[0].incremental {
+	//     // If nothing was written yet, initialize "streaming"
+	//     if resp.written == 0 && resp.body.len() == 0 {
+	// 	resp.incremental_data_generator = Some(
+	// 	    IncrementalDataGenerator::new(
+	// 		interval_duration_from_url(
+	// 		    &resp.url.as_ref().expect("url must be set"))
+	// 		    .expect("interval_us must be provided"),
+	// 		interval_len_from_url(
+	// 		    &resp.url.as_ref().expect("url must be set"))
+	// 		    .expect("inteval_us must be provided"),
+	// 		length_from_query_string(
+	// 		    &resp.url.as_ref().expect("url must be set"))
+	// 		    .expect("length must be provided")
+	// 	));
+	//     }
+	//     // Just maybe add data
+	//     resp.incremental_data_generator
+	// 	.as_mut()
+	// 	.expect("Must be created")
+	// 	.on_timeout()
+	// 	.as_mut()
+	// 	.map(|v| resp.body.append(v));
+	// } else
+	// if resp.incremental_data_generator.is_none() && resp.written == 0 && resp.body.len() == 0 {
+	//     // not incremental and body is zero
+	//     resp.body.append(&mut make_body_with_timestamp(resp.desired_length.unwrap()))
+	// }
 	    
         let body = &resp.body[resp.written..];
-
-        let written = match self.h3_conn.send_body(conn, stream_id, body, true) {
+        let written = match self.h3_conn.send_body(conn, stream_id, body, fin) {
             Ok(v) => v,
 
             Err(quiche::h3::Error::Done) => 0,
@@ -1929,7 +1970,7 @@ impl HttpConn for Http3Conn {
 
         resp.written += written;
 
-        if resp.written == resp.body.len() {
+        if fin && resp.written == resp.body.len() {
             partial_responses.remove(&stream_id);
         }
     }
