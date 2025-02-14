@@ -283,6 +283,7 @@
 //! [`send_body()`]: struct.Connection.html#method.send_body
 
 use std::collections::VecDeque;
+use std::time;
 
 #[cfg(feature = "sfv")]
 use std::convert::TryFrom;
@@ -790,12 +791,13 @@ fn eps_parse_burst_loss_tolerance(bitem: Option<&sfv::BareItem>) -> std::result:
 }
 
 #[cfg(feature = "sfv")]
-fn eps_parse_repair_delay_tolerance(bitem: Option<&sfv::BareItem>) -> std::result::Result<u64, crate::h3::Error> {
+fn eps_parse_repair_delay_tolerance(bitem: Option<&sfv::BareItem>) -> std::result::Result<time::Duration, crate::h3::Error> {
     match bitem {
-	None => Ok(0),
+	None => Ok(time::Duration::ZERO),
 	Some(bi) => match bi.as_int() {
 	    Some(v) => {
-		Ok(u64::try_from(v).map_err(|_| Error::Done)?)
+		Ok(time::Duration::from_millis(
+		    u64::try_from(v).map_err(|_| Error::Done)?))
 	    },
 	    None => Err(Error::Done),
 	}
@@ -824,7 +826,7 @@ pub struct PriorityValues {
     pub protection_ratio: u32,
     pub burst_loss_tolerance: u32,
     // in promille, cannot implement Eq for float types
-    pub repair_delay_tolerance: u64,
+    pub repair_delay_tolerance: time::Duration,
 }
 
 
@@ -837,7 +839,7 @@ impl Default for PriorityValues {
 	    id: None,
 	    protection_ratio: 0,
 	    burst_loss_tolerance: 0,
-	    repair_delay_tolerance: 0,
+	    repair_delay_tolerance: time::Duration::ZERO,
         }
     }
 }
@@ -861,7 +863,7 @@ impl PriorityValues {
     pub fn new_experimental(urgency: u8, incremental: bool, weight: u32,
 			    id: Option<String>,
 			    protection_ratio: u32, burst_loss_tolerance: u32,
-			    repair_delay_tolerance: u64) -> Self {
+			    repair_delay_tolerance: time::Duration) -> Self {
 	Self {
 	    urgency,
 	    incremental,
@@ -1287,7 +1289,11 @@ impl Connection {
 	} else {
 	    ReliabilityLevel::RecoveryOnly
 	};
-	conn.stream_fec(stream_id, true, reliability_level, priority.0[0].incremental).unwrap();
+	conn.stream_fec(stream_id,
+			true,
+			reliability_level,
+			priority.0[0].incremental,
+			priority.0[0].repair_delay_tolerance).unwrap();
         self.send_headers(conn, stream_id, headers, fin)?;
 
         Ok(())

@@ -5388,7 +5388,8 @@ impl Connection {
     pub fn stream_fec(
 	&mut self, stream_id: u64, enable: bool,
 	reliability_level: ReliabilityLevel,
-	incremental: bool
+	incremental: bool,
+	repair_delay_tolerance: time::Duration,
     ) -> Result<()> {
 	if !self.fec_enabled && reliability_level != ReliabilityLevel::RecoveryOnly {
 	    return Err(Error::InvalidState);
@@ -5416,6 +5417,7 @@ impl Connection {
 				.unwrap());
 	    f.encoder.set_reliability_level(reliability_level);
 	    f.encoder.set_incremental(incremental);
+	    f.encoder.set_repair_delay_tolerance(repair_delay_tolerance);
 
 	    // let fec = self.fec.get_mut(&stream_id).unwrap();
 	    // fec.encoder.set_reliability_level(reliability_level);
