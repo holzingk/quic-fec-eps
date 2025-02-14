@@ -790,17 +790,12 @@ fn eps_parse_burst_loss_tolerance(bitem: Option<&sfv::BareItem>) -> std::result:
 }
 
 #[cfg(feature = "sfv")]
-fn eps_parse_repair_delay_tolerance(bitem: Option<&sfv::BareItem>) -> std::result::Result<u32, crate::h3::Error> {
+fn eps_parse_repair_delay_tolerance(bitem: Option<&sfv::BareItem>) -> std::result::Result<u64, crate::h3::Error> {
     match bitem {
 	None => Ok(0),
-	Some(bi) => match bi.as_decimal() {
+	Some(bi) => match bi.as_int() {
 	    Some(v) => {
-		let f = v.to_f64().ok_or(Error::Done)?;
-		if f > 0.0 && f < 1.0 {
-		    Ok((f * 1000.0) as u32)
-		} else {
-		    Err(Error::Done)
-		}
+		Ok(u64::try_from(v).map_err(|_| Error::Done)?)
 	    },
 	    None => Err(Error::Done),
 	}
@@ -829,7 +824,7 @@ pub struct PriorityValues {
     pub protection_ratio: u32,
     pub burst_loss_tolerance: u32,
     // in promille, cannot implement Eq for float types
-    pub repair_delay_tolerance: u32,
+    pub repair_delay_tolerance: u64,
 }
 
 
@@ -866,7 +861,7 @@ impl PriorityValues {
     pub fn new_experimental(urgency: u8, incremental: bool, weight: u32,
 			    id: Option<String>,
 			    protection_ratio: u32, burst_loss_tolerance: u32,
-			    repair_delay_tolerance: u32) -> Self {
+			    repair_delay_tolerance: u64) -> Self {
 	Self {
 	    urgency,
 	    incremental,
