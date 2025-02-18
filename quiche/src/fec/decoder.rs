@@ -111,8 +111,7 @@ impl SourceSymbols {
                 true
             },
             // there is a gap
-            Some((last_sid, _))
-                if source_symbol.source_symbol_id > *last_sid + 1 =>
+            Some((last_sid, _)) if source_symbol.source_symbol_id > *last_sid + 1 =>
             {
                 // everything within the gap is missing
 		trace!("{} is a non-consecutive SID, adding everything from {last_sid} as missing",
@@ -124,8 +123,7 @@ impl SourceSymbols {
                 true
             },
             // there is something out of order
-            Some((last_sid, _))
-                if source_symbol.source_symbol_id <= *last_sid =>
+            Some((last_sid, _)) if source_symbol.source_symbol_id <= *last_sid =>
             {
                 if self
                     .source_buffer
@@ -284,7 +282,7 @@ impl RepairSymbols {
                 below.insert(*rid);
             }
         }
-	trace!("Below missing sid {smallest_missing_sid} are: {:?}", below);
+	trace!("RIDs below missing sid {smallest_missing_sid} are: {:?}", below);
 
         // rids, die noch für smallest missing sid benötigt werden von below abziehen
         let unneeded_rids = match self.window.get_mut(&smallest_missing_sid) {
@@ -300,9 +298,8 @@ impl RepairSymbols {
 	trace!("The following rids are no longer needed and are removed: {:?}", unneeded_rids);
         for unneeded_rid in unneeded_rids {
             let rs = self.repair_buffer.remove(&unneeded_rid).unwrap();
-            for (_sid, rids) in self
-                .window
-                .range_mut(rs.smallest_symbol_id..=rs.largest_symbol_id)
+	    assert!(rs.largest_symbol_id < smallest_missing_sid);
+            for (_sid, rids) in self.window.range_mut(rs.smallest_symbol_id..=rs.largest_symbol_id)
             {
                 rids.remove(&unneeded_rid);
             }
@@ -316,7 +313,7 @@ impl RepairSymbols {
     fn first_sid_in_window(&self) -> Option<u64> {
         self.window
             .first_key_value()
-	    .map(|(k, v)| *k)
+	    .map(|(k, _v)| *k)
     }
 
     // fn get_symbols(&mut self) -> impl Iterator<Item = &mut RepairSymbol> {
@@ -401,6 +398,8 @@ impl Decoder {
         let ss = SourceSymbol::new(source_symbol_id, src, &self.config)?;
         self.source_symbols.add(ss);
 	self.received_source_symbols += 1;
+	// Collect garbage as repair symbols might have become unnecessary
+	self.collect_garbage();
         Ok(())
     }
 
