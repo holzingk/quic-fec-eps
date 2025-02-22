@@ -770,6 +770,37 @@ impl HLSScheduler {
         self.hierarchy = hierarchy;
     }
 
+    /// Ensures that the updated balance counters follow the invariant specified in the HLS paper.
+    /// This check is performed after applying the updates outlined by formulas (5) through (9).
+    pub(crate) fn hls_invariant_holds(&self) -> bool {
+        let sum_balances = self
+            .hierarchy
+            .classes
+            .values()
+            .map(|c| c.balance)
+            .sum::<i64>();
+
+        let root_id = self.hierarchy.root;
+        let root_residual = self.hierarchy.class(root_id).residual;
+        let internal_classes = self.hierarchy.internal_nodes(root_id);
+
+        // Sum up the residual of each internal class
+        let sum_residuals = internal_classes
+            .iter()
+            .map(|c| self.hierarchy.class(*c).residual)
+            .sum::<i64>();
+
+        let invariant = sum_balances + sum_residuals + root_residual;
+        let q = self.hierarchy.class(root_id).guarantee;
+
+        error!(
+            "Sum of balances and residuals={} doesn't match Q*={} for {:?},",
+            invariant, q, self.hierarchy
+        );
+
+        invariant == q
+    }
+
     /// Returns the sum of the weights of the active children of a class.
     fn weight_active_children(
         &self, i: u64, i_ac: HashSet<u64>, l_ac: HashSet<u64>,
