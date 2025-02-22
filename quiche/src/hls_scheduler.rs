@@ -121,14 +121,12 @@ impl HLSHierarchy {
     }
 
     /// Removes a stream that has finished from the hierarchy.
-    pub fn delete_stream(&mut self, stream_id: u64, mtu: usize) {
+    pub fn delete_stream(&mut self, stream_id: u64) {
         let root = self.root;
-        let capacity = self.capacity;
         let leaves = self.leaf_descendants(root);
 
         let mut deleted_hls: Vec<u64> = Vec::new();
         let mut deleted_eps: Vec<String> = Vec::new();
-        let mut capacity_decrease: u64 = 0;
 
         // Find the leaf with the corresponding stream ID
         if let Some(class_id) = leaves.iter().find_or_first(|l| self.class(**l).stream_id == Option::from(stream_id)) {
@@ -146,7 +144,7 @@ impl HLSHierarchy {
                 parent_class.children.remove(&child_id);
 
                 // Keep track of how much to decrease the capacity later
-                capacity_decrease += mtu as u64;
+                // capacity_decrease += mtu as u64;
 
                 // If the parent has no children left, continue removing classes.
                 if parent_class.children.is_empty() {
@@ -171,12 +169,6 @@ impl HLSHierarchy {
             debug!("Removing EPS ID {eps_id} from the hierachy");
             self.eps_to_hls_id.remove(&eps_id);
         }
-
-        if capacity >= capacity_decrease {
-            self.capacity -= capacity_decrease
-        } else {
-            self.capacity = 0
-        };
 
         // Done. Generate new guarantees.
         self.generate_guarantees();
@@ -269,7 +261,7 @@ impl HLSHierarchy {
         let mut hierarchy = HLSHierarchy {
             classes: HashMap::new(),
             root,
-            capacity: 0,
+            capacity: 135_000,
             next_id: root,
             eps_to_hls_id: Default::default(),
         };

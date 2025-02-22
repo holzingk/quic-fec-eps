@@ -2262,12 +2262,6 @@ impl Connection {
     fn recv_single(
         &mut self, buf: &mut [u8], info: &RecvInfo, recv_pid: Option<usize>,
     ) -> Result<usize> {
-        let mtu: usize = self
-            .path_stats()
-            .filter_map(|p| Option::from(p.pmtu))
-            .min()
-            .unwrap_or(1500);
-
         let now = time::Instant::now();
 
         if buf.is_empty() {
@@ -2972,7 +2966,7 @@ impl Connection {
                         // stream_recv() is used.
                         if stream.is_complete() && !stream.is_readable() {
                             // Remove the class from the hierarchy as soon as the stream completes
-                            self.hls_scheduler.hierarchy.delete_stream(stream_id, mtu);
+                            self.hls_scheduler.hierarchy.delete_stream(stream_id);
 
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
@@ -2999,7 +2993,7 @@ impl Connection {
                         // stream_recv() is used.
                         if stream.is_complete() && !stream.is_readable() {
                             // Remove the class from the hierarchy as soon as the stream completes
-                            self.hls_scheduler.hierarchy.delete_stream(stream_id, mtu);
+                            self.hls_scheduler.hierarchy.delete_stream(stream_id);
 
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
@@ -4889,12 +4883,6 @@ impl Connection {
     pub fn stream_recv(
         &mut self, stream_id: u64, out: &mut [u8],
     ) -> Result<(usize, bool)> {
-        let mtu: usize = self
-            .path_stats()
-            .filter_map(|p| Option::from(p.pmtu))
-            .min()
-            .unwrap_or(1500);
-
         // We can't read on our own unidirectional streams.
         if !stream::is_bidi(stream_id) &&
             stream::is_local(stream_id, self.is_server)
@@ -4927,7 +4915,7 @@ impl Connection {
                 // anymore.
                 if stream.is_complete() {
                     // Remove the class from the hierarchy as soon as the stream completes
-                    self.hls_scheduler.hierarchy.delete_stream(stream_id, mtu);
+                    self.hls_scheduler.hierarchy.delete_stream(stream_id);
                     self.streams.collect(stream_id, local);
                 }
 
@@ -4952,7 +4940,7 @@ impl Connection {
 
         if complete {
             // Remove the class from the hierarchy as soon as the stream completes
-            self.hls_scheduler.hierarchy.delete_stream(stream_id, mtu);
+            self.hls_scheduler.hierarchy.delete_stream(stream_id);
             self.streams.collect(stream_id, local);
         }
 
@@ -5236,12 +5224,6 @@ impl Connection {
         self.streams
             .update_priority(&old_priority_key, &new_priority_key);
 
-        let mtu = self
-            .path_stats()
-            .map(|s| s.pmtu)
-            .max()
-            .unwrap_or(1500);
-
         // Update the hierarchy, too.
         let hierarchy = &mut self.hls_scheduler.hierarchy;
 
@@ -5251,7 +5233,7 @@ impl Connection {
         let mut parent = hierarchy.root;
 
         // Delete the current stream from the hierarchy.
-        hierarchy.delete_stream(stream_id, mtu);
+        hierarchy.delete_stream(stream_id);
 
         // Reverse priority values (pv) to append exp_p path parameters top-down.
         for pv in priority.0.iter().rev() {
@@ -5291,9 +5273,6 @@ impl Connection {
                 debug!("Adding {} to EPS set", pv.id.clone().unwrap());
                 hierarchy.eps_to_hls_id.insert(pv.id.clone().unwrap(), parent);
             }
-
-            // Modify the root's capacity
-            hierarchy.capacity += mtu as u64;
         }
 
         // Convert weights into global guarantees accounting for the new capacity
@@ -7269,13 +7248,6 @@ impl Connection {
             priority.0[0].urgency = h3::PRIORITY_URGENCY_UPPER_BOUND;
         }
 
-        // Determine minimum path MTU
-        let mtu: usize = self
-            .path_stats()
-            .filter_map(|p| Option::from(p.pmtu))
-            .min()
-            .unwrap_or(1500);
-
         let result = self.streams.get_or_create(
             id,
             &self.local_transport_params,
@@ -7322,9 +7294,6 @@ impl Connection {
                     if pv.id.is_some() {
                         hierarchy.eps_to_hls_id.insert(pv.id.clone().unwrap(), parent);
                     }
-
-                    // Modify the root's capacity
-                    hierarchy.capacity += mtu as u64;
                 }
 
                 // Convert weights into global guarantees accounting for the new capacity

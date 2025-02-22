@@ -4515,7 +4515,7 @@ mod tests {
         assert!(active_streams.contains(&stream_c));
 
         // Now, simulate C finishing the transmission and leaving the hierarchy.
-        scheduler.hierarchy.delete_stream(stream_c, 1500);
+        scheduler.hierarchy.delete_stream(stream_c);
 
         let active_streams = scheduler.schedule(vec![stream_a1, stream_a2, stream_b1, stream_b2]);
 
@@ -4525,7 +4525,7 @@ mod tests {
         assert!(active_streams.contains(&stream_b2));
 
         // Now, suppose A1 finishes.
-        scheduler.hierarchy.delete_stream(stream_a1, 1500);
+        scheduler.hierarchy.delete_stream(stream_a1);
 
         let active_streams = scheduler.schedule(vec![stream_a2, stream_b1, stream_b2]);
 
@@ -4581,9 +4581,9 @@ mod tests {
         // Now, simulate A, C1, and C2 finishing the transmission
         // and leaving the hierarchy at the same time.
         // (Should be the case if C1's filesize matches C2, respectively being 1/10th of A)
-        scheduler.hierarchy.delete_stream(stream_a, 1500);
-        scheduler.hierarchy.delete_stream(stream_c1, 1500);
-        scheduler.hierarchy.delete_stream(stream_c2, 1500);
+        scheduler.hierarchy.delete_stream(stream_a);
+        scheduler.hierarchy.delete_stream(stream_c1);
+        scheduler.hierarchy.delete_stream(stream_c2);
 
         let active_streams = scheduler.schedule(vec![stream_b1, stream_b2]);
 
@@ -4592,7 +4592,7 @@ mod tests {
         assert!(active_streams.contains(&stream_b2));
 
         // Now, B2 finishes.
-        scheduler.hierarchy.delete_stream(stream_b2, 1500);
+        scheduler.hierarchy.delete_stream(stream_b2);
 
         let active_streams = scheduler.schedule(vec![stream_b1]);
 
@@ -4632,7 +4632,7 @@ mod tests {
         assert!(active_streams.contains(&stream_d));
 
         // Now, simulate D finishing the transmission and leaving the hierarchy.
-        scheduler.hierarchy.delete_stream(stream_d, 1500);
+        scheduler.hierarchy.delete_stream(stream_d);
 
         let active_streams = scheduler.schedule(vec![stream_c]);
 
