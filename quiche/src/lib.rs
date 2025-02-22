@@ -4532,9 +4532,6 @@ impl Connection {
                 }
 
                 if !scheduler.hls_invariant_holds() {
-                    let root_id = scheduler.hierarchy.root;
-                    let q = scheduler.hierarchy.class(root_id).guarantee;
-
                     return Err(Error::HLSSchedulerViolation);
                 }
 

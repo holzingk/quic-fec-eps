@@ -638,6 +638,7 @@ impl HLSScheduler {
 
         // Reset scheduler if it's not in a surplus round.
         if !self.surplus_round {
+            trace!("Resetting the hierarchy to its initial settings");
             let root_id = self.hierarchy.root;
 
             let classes = self.hierarchy.classes.keys().copied().collect::<HashSet<u64>>();
