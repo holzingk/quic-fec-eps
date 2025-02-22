@@ -32,9 +32,6 @@ pub struct HLSClass {
     /// The stream id of this class. `None` for classes that are not leaves.
     pub stream_id: Option<u64>,
 
-    /// Whether the class became idle during a round.
-    idle: bool,
-
     /// Whether the class' balance has already been updated.
     pub ticked: bool,
 
@@ -253,7 +250,6 @@ impl HLSClass {
             residual: 0,
             fair_quota: None,
             stream_id: None,
-            idle: false,
             emitted: 0,
             ticked: false,
             guarantee: 0,
@@ -653,7 +649,6 @@ impl HLSScheduler {
 
                 class.residual = 0;
                 class.fair_quota = None;
-                class.idle = false;
                 class.ticked = false;
                 class.emitted = 0;
                 self.hierarchy.guarantee_from_weight(class_id);
@@ -804,9 +799,6 @@ impl HLSScheduler {
             // The class is now satisfied.
             {
                 let class = self.hierarchy.mut_class(class_id);
-
-                // Mark class as idle.
-                class.idle = true;
 
                 // Set its balance to 0, as per formula (9).
                 class.balance = 0;
