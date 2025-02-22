@@ -515,9 +515,6 @@ pub struct HLSScheduler {
     /// The class hierarchy.
     pub hierarchy: HLSHierarchy,
 
-    /// Whether the scheduler is in a main round.
-    main_round: bool,
-
     /// Whether the scheduler is in a surplus round.
     surplus_round: bool,
 
@@ -532,7 +529,6 @@ impl HLSScheduler {
             hierarchy,
             i_ac: HashSet::new(),
             l_ac: HashSet::new(),
-            main_round: false,
             surplus_round: false,
             pending_leaves: VecDeque::new(),
         }
@@ -640,11 +636,29 @@ impl HLSScheduler {
 
         let mut pending_leaves: VecDeque<u64> = VecDeque::new();
 
-        // Initialize the scheduler before there are any active classes.
-        if !self.main_round && !self.surplus_round {
+        // Reset scheduler if it's not in a surplus round.
+        if !self.surplus_round {
             let root_id = self.hierarchy.root;
-            let root = self.hierarchy.mut_class(root_id);
-            root.balance = root.guarantee;
+
+            let classes = self.hierarchy.classes.keys().copied().collect::<HashSet<u64>>();
+
+            for class_id  in classes {
+                // Update balances. The root's capacity is its guarantee.
+                let class = self.hierarchy.mut_class(class_id);
+
+                if class_id == root_id {
+                    class.balance = class.guarantee;
+                } else {
+                    class.balance = 0;
+                }
+
+                class.residual = 0;
+                class.fair_quota = None;
+                class.idle = false;
+                class.ticked = false;
+                class.emitted = 0;
+                self.hierarchy.guarantee_from_weight(class_id);
+            }
         }
 
         // Marks the backlogged streams as active for a main or surplus round.
@@ -660,15 +674,7 @@ impl HLSScheduler {
                 let became_active = !prev_active_leaves.contains(&leaf);
                 let leaf_guarantee = stream_class.guarantee;
 
-                // This stream is now active.
-                stream_class.idle = false;
                 l_ac.insert(stream_class.id);
-
-                // Mark leaves as not being yet ticked.
-                stream_class.ticked = false;
-
-                // This stream has not emitted in this round.
-                stream_class.emitted = 0;
 
                 // Modify root's residual to dynamically adjust Q*.
                 if became_active {
@@ -716,6 +722,8 @@ impl HLSScheduler {
                 trace!("Performing surplus round: class {i} has b={balance} + r={residual} > w_ac={child_weights_sum}.");
                 do_surplus = true;
                 break;
+            } else {
+                do_surplus = false;
             }
         }
 
@@ -743,7 +751,6 @@ impl HLSScheduler {
 
         // After initialization, the scheduler is always either in a main or surplus round.
         self.surplus_round = do_surplus;
-        self.main_round = !do_surplus;
 
         // Reset which stream was visited last, as all active streams will have to tick at least once.
         self.i_ac = i_ac;
