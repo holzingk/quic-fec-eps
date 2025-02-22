@@ -623,8 +623,6 @@ impl HLSScheduler {
     /// `backlogged_streams`: Vector of flushable stream IDs
     pub(crate) fn init_round(&mut self, backlogged_streams: Vec<u64>) {
         let root_id = self.hierarchy.root;
-        // Active classes are determined at the start of every round.
-        let prev_active_leaves = self.l_ac.clone();
 
         let internal_classes: HashSet<u64> =
             self.hierarchy.internal_nodes(root_id);
@@ -670,24 +668,7 @@ impl HLSScheduler {
                 .find(|id| self.hierarchy.class(**id).stream_id.unwrap() == sid)
             {
                 let stream_class = self.hierarchy.mut_class(*leaf);
-
-                let became_idle = stream_class.idle;
-                let became_active = !prev_active_leaves.contains(&leaf);
-                let leaf_guarantee = stream_class.guarantee;
-
                 l_ac.insert(stream_class.id);
-
-                // Modify root's residual to dynamically adjust Q*.
-                if became_active {
-                    debug!("Stream {} became active. Adding {} to root's residual.", sid, leaf_guarantee);
-                    self.hierarchy.mut_class(root_id).residual += leaf_guarantee;
-                }
-
-                if became_idle {
-                    debug!("Stream {} became idle in the past round. Subtracting {} from root's residual.", sid, leaf_guarantee);
-                    self.hierarchy.mut_class(root_id).residual -= leaf_guarantee;
-                }
-
                 pending_leaves.push_back(*leaf);
             }
         }
