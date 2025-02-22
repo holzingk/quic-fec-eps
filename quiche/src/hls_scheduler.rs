@@ -770,10 +770,14 @@ impl HLSScheduler {
         let invariant = sum_balances + sum_residuals + root_residual;
         let q = self.hierarchy.class(root_id).guarantee;
 
-        error!(
-            "Sum of balances and residuals={} doesn't match Q*={} for {:?},",
-            invariant, q, self.hierarchy
-        );
+        let fulfilled = invariant == q;
+
+        if !fulfilled {
+            error!(
+                "Sum of balances and residuals={} doesn't match Q*={} for {:?},",
+                invariant, q, self.hierarchy
+            );
+        }
 
         invariant == q
     }

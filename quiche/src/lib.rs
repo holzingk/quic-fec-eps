@@ -4531,10 +4531,9 @@ impl Connection {
                     scheduler.pending_leaves.pop_front();
                 }
 
-                // TODO
-                // if !scheduler.hls_invariant_holds() {
-                //     return Err(Error::HLSSchedulerViolation);
-                // }
+                if !scheduler.hls_invariant_holds() {
+                    return Err(Error::HLSSchedulerViolation);
+                }
 
                 // Encode the frame's header.
                 //
