@@ -779,7 +779,7 @@ impl HLSScheduler {
             );
         }
 
-        invariant == q
+        fulfilled
     }
 
     /// Returns the sum of the weights of the active children of a class.
