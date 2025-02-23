@@ -624,13 +624,12 @@ impl HLSScheduler {
         if !self.surplus_round {
             trace!("Resetting the hierarchy to its initial settings");
             let root_id = self.hierarchy.root;
-
-            let classes = self.hierarchy.classes.keys().copied().collect::<HashSet<u64>>();
+            let class_count = 1 + internal_classes.iter().len() + leaf_classes.iter().len();
 
             // Set Q*.
-            self.hierarchy.capacity = (classes.len() * MAX_SEND_UDP_PAYLOAD_SIZE) as u64;
+            self.hierarchy.capacity = ((class_count + backlogged_streams.len()) * MAX_SEND_UDP_PAYLOAD_SIZE) as u64;
 
-            for class_id  in classes {
+            for class_id  in self.hierarchy.classes.keys().copied().collect::<HashSet<u64>>() {
                 // Update balances. The root's capacity is its guarantee.
                 self.hierarchy.guarantee_from_weight(class_id);
 
