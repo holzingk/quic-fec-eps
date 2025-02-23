@@ -583,8 +583,7 @@ impl HttpConn for Http09Conn {
                     let reqs_count = self.reqs.len();
 
                     debug!(
-                        "{}/{} responses received",
-                        self.reqs_complete, reqs_count
+                        "{{s: {}, t: {:?}}}", s, req_start.elapsed(),
                     );
 
                     if self.reqs_complete == reqs_count {
