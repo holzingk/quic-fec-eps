@@ -628,7 +628,7 @@ impl HLSScheduler {
             let classes = self.hierarchy.classes.keys().copied().collect::<HashSet<u64>>();
 
             // Set Q*.
-            self.hierarchy.capacity = ((classes.len()  + backlogged_streams.len()) * MAX_SEND_UDP_PAYLOAD_SIZE) as u64;
+            self.hierarchy.capacity = (classes.len() * MAX_SEND_UDP_PAYLOAD_SIZE) as u64;
 
             for class_id  in classes {
                 // Update balances. The root's capacity is its guarantee.
