@@ -1414,7 +1414,7 @@ impl HttpConn for Http3Conn {
 			None => warn!("No reponse writer found"),
 		    }
                     debug!(
-                        "{{s: {}, t: {:?}}}", stream_id, req_start.elapsed(),
+                        "{{s: {}, t: {:?}}}", stream_id, req_start.elapsed().as_millis(),
                     );
 
                     if self.reqs_complete == reqs_count {
@@ -1422,7 +1422,7 @@ impl HttpConn for Http3Conn {
                             "{}/{} response(s) received in {:?}, closing...",
                             self.reqs_complete,
                             reqs_count,
-                            req_start.elapsed()
+                            req_start.elapsed().as_millis()
                         );
 
                         if self.dump_json {
