@@ -1413,6 +1413,9 @@ impl HttpConn for Http3Conn {
                         },
 			None => warn!("No reponse writer found"),
 		    }
+                    debug!(
+                        "{{s: {}, t: {:?}}}", stream_id, req_start.elapsed(),
+                    );
 
                     if self.reqs_complete == reqs_count {
                         info!(
