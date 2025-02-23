@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::fmt::Formatter;
 use itertools::Itertools;
+use crate::MAX_SEND_UDP_PAYLOAD_SIZE;
 
 /// Implementation of the Hierarchical Link Sharing (HLS) Scheduling algorithm.
 #[derive(Clone, Debug)]
@@ -143,9 +144,6 @@ impl HLSHierarchy {
                 // Remove the child
                 parent_class.children.remove(&child_id);
 
-                // Keep track of how much to decrease the capacity later
-                // capacity_decrease += mtu as u64;
-
                 // If the parent has no children left, continue removing classes.
                 if parent_class.children.is_empty() {
                     deleted_hls.push(parent_id);
@@ -261,7 +259,7 @@ impl HLSHierarchy {
         let mut hierarchy = HLSHierarchy {
             classes: HashMap::new(),
             root,
-            capacity: 135_000,
+            capacity: 0,
             next_id: root,
             eps_to_hls_id: Default::default(),
         };
@@ -629,8 +627,13 @@ impl HLSScheduler {
 
             let classes = self.hierarchy.classes.keys().copied().collect::<HashSet<u64>>();
 
+            // Set Q*.
+            self.hierarchy.capacity = (backlogged_streams.len() * MAX_SEND_UDP_PAYLOAD_SIZE) as u64;
+
             for class_id  in classes {
                 // Update balances. The root's capacity is its guarantee.
+                self.hierarchy.guarantee_from_weight(class_id);
+
                 let class = self.hierarchy.mut_class(class_id);
 
                 if class_id == root_id {
@@ -643,7 +646,6 @@ impl HLSScheduler {
                 class.fair_quota = None;
                 class.ticked = false;
                 class.emitted = 0;
-                self.hierarchy.guarantee_from_weight(class_id);
             }
         }
 
@@ -739,40 +741,41 @@ impl HLSScheduler {
         self.hierarchy = hierarchy;
     }
 
-    // /// Ensures that the updated balance counters follow the invariant specified in the HLS paper.
-    // /// This check is performed after applying the updates outlined by formulas (5) through (9).
-    // pub(crate) fn hls_invariant_holds(&self) -> bool {
-    //     let sum_balances = self
-    //         .hierarchy
-    //         .classes
-    //         .values()
-    //         .map(|c| c.balance)
-    //         .sum::<i64>();
-    //
-    //     let root_id = self.hierarchy.root;
-    //     let root_residual = self.hierarchy.class(root_id).residual;
-    //     let internal_classes = self.hierarchy.internal_nodes(root_id);
-    //
-    //     // Sum up the residual of each internal class
-    //     let sum_residuals = internal_classes
-    //         .iter()
-    //         .map(|c| self.hierarchy.class(*c).residual)
-    //         .sum::<i64>();
-    //
-    //     let invariant = sum_balances + sum_residuals + root_residual;
-    //     let q = self.hierarchy.class(root_id).guarantee;
-    //
-    //     let fulfilled = invariant == q;
-    //
-    //     if !fulfilled {
-    //         error!(
-    //             "Sum of balances and residuals={} doesn't match Q*={} for {:?},",
-    //             invariant, q, self.hierarchy
-    //         );
-    //     }
-    //
-    //     fulfilled
-    // }
+    /// Ensures that the updated balance counters follow the invariant specified in the HLS paper.
+    /// This check is performed after applying the updates outlined by formulas (5) through (9).
+    #[allow(dead_code)]
+    pub(crate) fn hls_invariant_holds(&self) -> bool {
+        let sum_balances = self
+            .hierarchy
+            .classes
+            .values()
+            .map(|c| c.balance)
+            .sum::<i64>();
+
+        let root_id = self.hierarchy.root;
+        let root_residual = self.hierarchy.class(root_id).residual;
+        let internal_classes = self.hierarchy.internal_nodes(root_id);
+
+        // Sum up the residual of each internal class
+        let sum_residuals = internal_classes
+            .iter()
+            .map(|c| self.hierarchy.class(*c).residual)
+            .sum::<i64>();
+
+        let invariant = sum_balances + sum_residuals + root_residual;
+        let q = self.hierarchy.class(root_id).guarantee;
+
+        let fulfilled = invariant == q;
+
+        if !fulfilled {
+            error!(
+                "Sum of balances and residuals={} doesn't match Q*={} for {:?},",
+                invariant, q, self.hierarchy
+            );
+        }
+
+        fulfilled
+    }
 
     /// Returns the sum of the weights of the active children of a class.
     fn weight_active_children(
