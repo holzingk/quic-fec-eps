@@ -619,7 +619,13 @@ impl HLSScheduler {
     }
 
     pub(crate) fn reset(&mut self) {
+        trace!("Resetting the scheduler to the initial settings");
         let root_id = self.hierarchy.root;
+        let q = self.calculate_q();
+        self.hierarchy.capacity = q;
+
+        trace!("Set Q* = {}", q);
+
         for class_id  in self.hierarchy.classes.keys().copied().collect::<HashSet<u64>>() {
             // Update balances. The root's capacity is its guarantee.
             self.hierarchy.guarantee_from_weight(class_id);
@@ -638,6 +644,8 @@ impl HLSScheduler {
             class.emitted = 0;
         }
 
+        // Reset pending leaves for the new round.
+        // NO-OP unless the round re-start is forced by new stream arrivals.
         self.pending_leaves = VecDeque::new();
     }
 
@@ -656,10 +664,6 @@ impl HLSScheduler {
 
         // Reset scheduler if it's not in a surplus round.
         if !self.surplus_round {
-            trace!("Resetting the scheduler and the hierarchy to the initial settings");
-            // Set Q*.
-            self.hierarchy.capacity = self.calculate_q();
-
             // Reset the scheduler
             self.reset();
         }
