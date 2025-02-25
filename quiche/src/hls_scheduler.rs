@@ -605,6 +605,42 @@ impl HLSScheduler {
         fair_quota
     }
 
+    /// Calculates Q*.
+    pub(crate) fn calculate_q(&self) -> u64 {
+        let root_id = self.hierarchy.root;
+
+        let internal_classes: usize = self.hierarchy.internal_nodes(root_id).iter().len();
+        let leaf_classes: usize = self.hierarchy.leaf_descendants(root_id).iter().len();
+
+        // Total number of classes (including the root)
+        let class_count = 1 + internal_classes + leaf_classes;
+
+        (class_count * MAX_SEND_UDP_PAYLOAD_SIZE) as u64
+    }
+
+    pub(crate) fn reset(&mut self) {
+        let root_id = self.hierarchy.root;
+        for class_id  in self.hierarchy.classes.keys().copied().collect::<HashSet<u64>>() {
+            // Update balances. The root's capacity is its guarantee.
+            self.hierarchy.guarantee_from_weight(class_id);
+
+            let class = self.hierarchy.mut_class(class_id);
+
+            if class_id == root_id {
+                class.balance = class.guarantee;
+            } else {
+                class.balance = 0;
+            }
+
+            class.residual = 0;
+            class.fair_quota = None;
+            class.ticked = false;
+            class.emitted = 0;
+        }
+
+        self.pending_leaves = VecDeque::new();
+    }
+
     /// Prepares the round-robin scheduler for a new main round.
     /// `backlogged_streams`: Vector of flushable stream IDs
     pub(crate) fn init_round(&mut self, backlogged_streams: Vec<u64>) {
@@ -618,34 +654,14 @@ impl HLSScheduler {
         let mut i_ac: HashSet<u64> = HashSet::new();
         let mut l_ac: HashSet<u64> = HashSet::new();
 
-        let mut pending_leaves: VecDeque<u64> = VecDeque::new();
-
         // Reset scheduler if it's not in a surplus round.
         if !self.surplus_round {
-            trace!("Resetting the hierarchy to its initial settings");
-            let root_id = self.hierarchy.root;
-            let class_count = 1 + internal_classes.iter().len() + leaf_classes.iter().len();
-
+            trace!("Resetting the scheduler and the hierarchy to the initial settings");
             // Set Q*.
-            self.hierarchy.capacity = ((class_count + backlogged_streams.len()) * MAX_SEND_UDP_PAYLOAD_SIZE) as u64;
+            self.hierarchy.capacity = self.calculate_q();
 
-            for class_id  in self.hierarchy.classes.keys().copied().collect::<HashSet<u64>>() {
-                // Update balances. The root's capacity is its guarantee.
-                self.hierarchy.guarantee_from_weight(class_id);
-
-                let class = self.hierarchy.mut_class(class_id);
-
-                if class_id == root_id {
-                    class.balance = class.guarantee;
-                } else {
-                    class.balance = 0;
-                }
-
-                class.residual = 0;
-                class.fair_quota = None;
-                class.ticked = false;
-                class.emitted = 0;
-            }
+            // Reset the scheduler
+            self.reset();
         }
 
         // Marks the backlogged streams as active for a main or surplus round.
@@ -657,12 +673,12 @@ impl HLSScheduler {
             {
                 let stream_class = self.hierarchy.mut_class(*leaf);
                 l_ac.insert(stream_class.id);
-                pending_leaves.push_back(*leaf);
+                self.pending_leaves.push_back(*leaf);
             }
         }
 
         // Reset the fair quotas of all internal classes.
-        for id in internal_classes.clone() {
+        for id in internal_classes {
             let node = self.hierarchy.mut_class(id);
             node.fair_quota = None;
         }
@@ -725,7 +741,6 @@ impl HLSScheduler {
         // Reset which stream was visited last, as all active streams will have to tick at least once.
         self.i_ac = i_ac;
         self.l_ac = l_ac;
-        self.pending_leaves = pending_leaves;
 
         trace!(
             "Streams {:?} backlogged. Starting {} round: {:?}",
