@@ -136,7 +136,7 @@ impl HLSHierarchy {
 
             // Remove children bottom-up
             while let Some(parent_id) = class.parent {
-                debug!("Deleting child {child_id} with parent {parent_id}");
+                trace!("Deleting child {child_id} with parent {parent_id}");
 
                 // Get the parent of the child
                 let parent_class = self.mut_class(parent_id);
@@ -164,7 +164,7 @@ impl HLSHierarchy {
         }
 
         for eps_id in deleted_eps {
-            debug!("Removing EPS ID {eps_id} from the hierachy");
+            trace!("Removing EPS ID {eps_id} from the hierachy");
             self.eps_to_hls_id.remove(&eps_id);
         }
 
@@ -506,6 +506,9 @@ pub struct HLSScheduler {
 
     /// Class IDs (not stream IDs!) that have yet to be visited by the round-robin round.
     pub(crate) pending_leaves: VecDeque<u64>,
+
+    /// Streams that became idle during the scheduling round
+    pub(crate) idle_streams: VecDeque<u64>,
 }
 
 impl HLSScheduler {
@@ -517,6 +520,7 @@ impl HLSScheduler {
             l_ac: HashSet::new(),
             surplus_round: false,
             pending_leaves: VecDeque::new(),
+            idle_streams: VecDeque::new(),
         }
     }
 
@@ -618,8 +622,18 @@ impl HLSScheduler {
         (class_count * MAX_SEND_UDP_PAYLOAD_SIZE) as u64
     }
 
-    pub(crate) fn reset(&mut self) {
+    /// Resets the scheduling round.
+    pub(crate) fn reset_scheduler(&mut self) {
         trace!("Resetting the scheduler to the initial settings");
+
+        // Remove classes that became idle during the scheduling round.
+        for stream_id in &self.idle_streams {
+            self.hierarchy.delete_stream(*stream_id);
+        }
+
+        // Reset idle streams
+        self.idle_streams = VecDeque::new();
+
         let root_id = self.hierarchy.root;
         let q = self.calculate_q();
         self.hierarchy.capacity = q;
@@ -664,8 +678,7 @@ impl HLSScheduler {
 
         // Reset scheduler if it's not in a surplus round.
         if !self.surplus_round {
-            // Reset the scheduler
-            self.reset();
+            self.reset_scheduler();
         }
 
         // Marks the backlogged streams as active for a main or surplus round.
@@ -761,7 +774,6 @@ impl HLSScheduler {
 
     /// Ensures that the updated balance counters follow the invariant specified in the HLS paper.
     /// This check is performed after applying the updates outlined by formulas (5) through (9).
-    #[allow(dead_code)]
     pub(crate) fn hls_invariant_holds(&self) -> bool {
         let sum_balances = self
             .hierarchy
@@ -786,8 +798,8 @@ impl HLSScheduler {
         let fulfilled = invariant == q;
 
         if !fulfilled {
-            error!(
-                "Sum of balances and residuals={} doesn't match Q*={} for {:?},",
+            panic!(
+                "HLS Scheduler Violation: sum of balances and residuals={} doesn't match Q*={} for {:?},",
                 invariant, q, self.hierarchy
             );
         }
@@ -836,7 +848,7 @@ impl HLSScheduler {
                 let active_classes: HashSet<u64> =
                     self.l_ac.union(&self.i_ac).copied().collect();
 
-                debug!(
+                trace!(
                     "Returned residual of {class_balance} to the parent.{:?}",
                     &self.hierarchy
                 );

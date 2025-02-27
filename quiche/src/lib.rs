@@ -2965,8 +2965,8 @@ impl Connection {
                         // readable. If it is readable, it will get collected when
                         // stream_recv() is used.
                         if stream.is_complete() && !stream.is_readable() {
-                            // Remove the class from the hierarchy as soon as the stream completes
-                            self.hls_scheduler.hierarchy.delete_stream(stream_id);
+                            // Mark the stream as idle so it's removed at the start of the next round
+                            self.hls_scheduler.idle_streams.push_back(stream_id);
 
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
@@ -2992,8 +2992,8 @@ impl Connection {
                         // readable. If it is readable, it will get collected when
                         // stream_recv() is used.
                         if stream.is_complete() && !stream.is_readable() {
-                            // Remove the class from the hierarchy as soon as the stream completes
-                            self.hls_scheduler.hierarchy.delete_stream(stream_id);
+                            // Mark the stream as idle so it's removed at the start of the next round
+                            self.hls_scheduler.idle_streams.push_back(stream_id);
 
                             let local = stream.local;
                             self.streams.collect(stream_id, local);
@@ -4914,8 +4914,8 @@ impl Connection {
                 // the application, so we don't need to keep the stream's state
                 // anymore.
                 if stream.is_complete() {
-                    // Remove the class from the hierarchy as soon as the stream completes
-                    self.hls_scheduler.hierarchy.delete_stream(stream_id);
+                    // Mark the stream as idle so it's removed at the start of the next round
+                    self.hls_scheduler.idle_streams.push_back(stream_id);
                     self.streams.collect(stream_id, local);
                 }
 
@@ -4940,7 +4940,7 @@ impl Connection {
 
         if complete {
             // Remove the class from the hierarchy as soon as the stream completes
-            self.hls_scheduler.hierarchy.delete_stream(stream_id);
+            self.hls_scheduler.idle_streams.push_back(stream_id);
             self.streams.collect(stream_id, local);
         }
 
