@@ -1373,6 +1373,66 @@ impl Frame {
                 seq_num: *seq_num,
             },
 
+	    Frame::Repair {
+		fec_session,
+		smallest_sid,
+		highest_sid,
+		seed,
+		len,
+		data,		
+	    } => QuicFrame::Repair {
+		fec_session: *fec_session,
+		smallest_sid: *smallest_sid,
+		highest_sid: *highest_sid,
+		seed: *seed,
+		len: *len
+	    },
+
+	    Frame::RepairHeader {
+		fec_session,
+		smallest_sid,
+		highest_sid,
+		seed,
+		len,
+	    } => QuicFrame::RepairHeader {
+		fec_session: *fec_session,
+		smallest_sid: *smallest_sid,
+		highest_sid: *highest_sid,
+		seed: *seed,
+		len: *len
+	    },
+	    
+	    Frame::SourceSymbolHeader {
+		fec_session,
+		sid,
+		length		   
+	    } => QuicFrame::SourceSymbol {
+		fec_session: *fec_session,
+		sid: *sid,
+		len: *length
+	    },
+
+	    Frame::SourceSymbol {
+		fec_session,
+		sid,
+		length,
+		fec_protected_payload,
+	    } => QuicFrame::SourceSymbol {
+		fec_session: *fec_session,
+		sid: *sid,
+		len: *length
+	    },
+
+	    Frame::SymbolAck {
+		fec_session,
+		next_source_symbol,
+		lower_bound,
+	    } => QuicFrame::SymbolAck {
+		fec_session: *fec_session,
+		next_source_symbol: *next_source_symbol,
+		lower_bound: *lower_bound
+	    },
+	    
 	    _ => QuicFrame::Unknown{
 	     	raw_frame_type: 0,
 		frame_type_value: None,

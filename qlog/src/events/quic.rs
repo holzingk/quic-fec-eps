@@ -382,6 +382,11 @@ pub enum QuicFrameTypeName {
     AckMp,
     PathAbandon,
     PathStatus,
+    Repair,
+    RepairHeader,
+    SourceSymbol,
+    SourceSymbolHeader,
+    SymbolAck,
     Unknown,
 }
 
@@ -532,6 +537,40 @@ pub enum QuicFrame {
         seq_num: u64,
     },
 
+    Repair {
+	fec_session: u64,
+	smallest_sid: u64,
+	highest_sid: u64,
+	seed: u64,
+	len: u64,
+    },
+
+    RepairHeader {
+	fec_session: u64,
+	smallest_sid: u64,
+	highest_sid: u64,
+	seed: u64,
+	len: u64,
+    },
+
+    SourceSymbol {
+	fec_session: u64,
+	sid: u64,
+	len: u64,
+    },
+
+    SourceSymbolHeader {
+	fec_session: u64,
+	sid: u64,
+	len: u64,
+    },
+
+    SymbolAck {
+	fec_session: u64,
+	next_source_symbol: u64,
+	lower_bound: u64,
+    },
+    
     Unknown {
         raw_frame_type: u64,
         frame_type_value: Option<u64>,
