@@ -187,7 +187,17 @@ fn main() {
         let timeout = match continue_write {
             true => Some(std::time::Duration::from_secs(0)),
 
-            false => clients.values().filter_map(|c| c.conn.timeout()).min(),
+            false => {
+		let data_generator_timeout =
+		    clients.values().filter_map(|c | c.partial_responses
+						.values()
+						.filter_map(|p| p.incremental_data_generator.as_ref()
+							    .map(|idg| idg.timeout())
+						).min()
+		    ).min();
+		let client_timeout = clients.values().filter_map(|c| c.conn.timeout()).min();
+		std::cmp::min(data_generator_timeout, client_timeout)
+	    },
         };
 
         poll.poll(&mut events, timeout).unwrap();
