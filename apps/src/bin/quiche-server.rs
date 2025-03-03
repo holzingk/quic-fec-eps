@@ -222,7 +222,7 @@ fn main() {
 			p.on_timeout()
 		    });
 		});
-                break 'read;
+                // break 'read;
             }
 
             let (len, from) = match socket.recv_from(&mut buf) {
