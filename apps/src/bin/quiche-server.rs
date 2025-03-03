@@ -192,7 +192,9 @@ fn main() {
 		    clients.values().filter_map(|c | c.partial_responses
 						.values()
 						.filter_map(|p| p.incremental_data_generator.as_ref()
-							    .map(|idg| idg.timeout())
+							    .map(|idg| idg
+								 .timeout())
+								 .flatten()
 						).min()
 		    ).min();
 		let client_timeout = clients.values().filter_map(|c| c.conn.timeout()).min();

@@ -102,20 +102,28 @@ impl IncrementalDataGenerator {
 		    .checked_mul(self.chunks_generated + 1).unwrap()
 		    ).unwrap()
     }
-    
-    pub fn timeout(&self) -> Duration {
-	self.t_next_chunk()
-	    .duration_since(Instant::now())
+
+    pub fn timeout_instant(&self) -> Option<Instant> {
+	Some(self.t_next_chunk())
     }
 
+    pub fn timeout(&self) -> Option<Duration> {
+	self.timeout_instant().map(|timeout| {
+	    let now = Instant::now();
+            if timeout <= now {
+                Duration::ZERO
+            } else {
+                timeout.duration_since(now)
+            }
+        })
+    }
+    
     pub fn on_timeout(&mut self) -> Option<Vec<u8>> {
-	if self.timeout() == Duration::ZERO {
-	    self.chunks_generated += 1;
-	    
-	    Some(make_body_with_timestamp(self.len))
-	} else {
-	    None
+	if self.timeout() != Some(Duration::ZERO) {
+	    return None;
 	}
+	self.chunks_generated += 1;
+	Some(make_body_with_timestamp(self.len))
     }
 
     pub fn fin(&self) -> bool {
