@@ -222,7 +222,19 @@ fn main() {
 			p.on_timeout()
 		    });
 		});
-                // break 'read;
+		clients.values_mut().for_each(| c| {
+		    if c.http_conn.is_some() {
+			let conn = &mut c.conn;
+			let http_conn = c.http_conn.as_mut().unwrap();
+			let partial_responses = &mut c.partial_responses;
+
+			// Handle writable streams.
+			for stream_id in conn.writable() {
+			    http_conn.handle_writable(conn, partial_responses, stream_id);
+			}
+		    }
+		});
+                break 'read;
             }
 
             let (len, from) = match socket.recv_from(&mut buf) {
