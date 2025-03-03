@@ -191,11 +191,13 @@ fn main() {
 		let data_generator_timeout =
 		    clients.values().filter_map(|c | c.partial_responses
 						.values()
-						.filter_map(|p| p.incremental_data_generator.as_ref()
-							    .map(|idg| idg
-								 .timeout())
-								 .flatten()
-						).min()
+						.filter_map(|p| p.timeout())
+						.min()		    
+						// .filter_map(|p| p.incremental_data_generator.as_ref()
+						// 	    .map(|idg| idg
+						// 		 .timeout())
+						// 		 .flatten()
+
 		    ).min();
 		let client_timeout = clients.values().filter_map(|c| c.conn.timeout()).min();
 		std::cmp::min(data_generator_timeout, client_timeout)
@@ -217,11 +219,9 @@ fn main() {
 		    c.conn.on_timeout();
 		    // packet generator timeout
 		    c.partial_responses.values_mut().for_each(|p| {
-			p.incremental_data_generator.as_mut()
-			    .map(|idg| idg.on_timeout());
+			p.on_timeout()
 		    });
 		});
-
                 break 'read;
             }
 

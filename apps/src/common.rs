@@ -149,6 +149,24 @@ pub struct PartialResponse {
     
 }
 
+impl PartialResponse {
+    pub fn timeout(&self) -> Option<Duration> {
+	self.incremental_data_generator
+	    .as_ref()
+	    .map(|idg| idg.timeout())
+	    .flatten()
+    }
+
+    pub fn on_timeout(&mut self) {
+	let mut data =
+	    self.incremental_data_generator
+	    .as_mut()
+	    .map(|idg| idg.on_timeout())
+	    .flatten();
+	data.as_mut().map(|v| self.body.append(v));
+    }
+}	    
+
 pub type ClientId = u64;
 
 pub struct Client {
