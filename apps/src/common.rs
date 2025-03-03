@@ -1933,7 +1933,7 @@ impl HttpConn for Http3Conn {
 	    if let Some(dg) = &mut resp.incremental_data_generator {
 		// new data needs to be generated
 		if !dg.fin() {
-		    (dg.on_timeout(), false)
+		    (None, false)
 
 		} else {
 		    // fin should be sent, no new data
