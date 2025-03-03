@@ -210,8 +210,15 @@ fn main() {
             // will then proceed with the send loop.
             if events.is_empty() && !continue_write {
                 trace!("timed out");
-
-                clients.values_mut().for_each(|c| c.conn.on_timeout());
+                clients.values_mut().for_each(|c| {
+		    // client timeout
+		    c.conn.on_timeout();
+		    // packet generator timeout
+		    c.partial_responses.values_mut().for_each(|p| {
+			p.incremental_data_generator.as_mut()
+			    .map(|idg| idg.on_timeout());
+		    });
+		});
 
                 break 'read;
             }
