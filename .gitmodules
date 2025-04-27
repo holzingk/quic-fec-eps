@@ -4,4 +4,4 @@
 	ignore = dirty
 [submodule "moeprlnc"]
 	path = moeprlnc
-	url = git@gitlab.lrz.de:ga25day/improving-http3/moeprlnc.git
+	url = https://github.com/holzingk/moeprlnc.git
