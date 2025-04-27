@@ -2,3 +2,7 @@
 	path = quiche/deps/boringssl
 	url = https://github.com/google/boringssl.git
 	ignore = dirty
+[submodule "moeprlnc"]
+	path = moeprlnc
+	url = https://github.com/holzingk/moeprlnc.git
+
